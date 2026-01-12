@@ -1,13 +1,16 @@
 version: '3.8'
+
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
     container_name: es-container
     environment:
       - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m # 考虑到服务器配置，这里限制了内存
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m 
     ports:
       - "9200:9200"
+    volumes:
+      - /root/TraceX/data/elasticsearch:/usr/share/elasticsearch/data
     networks:
       - attack-range
 
@@ -20,7 +23,23 @@ services:
       - elasticsearch
     networks:
       - attack-range
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: cowrie-honeypot
+    restart: always
+    ports:
+      - "2222:2222"
+    volumes:
+      - /root/TraceX/infrastructure/range/honeypots/cowrie/etc:/cowrie/cowrie-git/etc
+      - /root/TraceX/infrastructure/range/honeypots/cowrie/var/log:/cowrie/cowrie-git/var/log
+      - /root/TraceX/infrastructure/range/honeypots/cowrie/var/lib:/cowrie/cowrie-git/var/lib
+    networks:
+      attack-range:
+        ipv4_address: 172.20.0.100
 
 networks:
   attack-range:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
