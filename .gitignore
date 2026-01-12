@@ -21,3 +21,4 @@ web-logs/
 db-logs/
 internal-logs/
 dc-logs/
+infrastructure/range/honeypots/
