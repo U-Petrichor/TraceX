@@ -30,10 +30,17 @@ class DestinationInfo:
     mac: str = ""
 
 @dataclass
+class HostOS:
+    family: str = ""
+    name: str = ""
+    version: str = ""
+
+@dataclass
 class HostInfo:
     name: str = ""
     hostname: str = ""
     ip: List[str] = field(default_factory=list)
+    os: HostOS = field(default_factory=HostOS)
 
 @dataclass
 class ProcessParent:
