@@ -91,4 +91,38 @@ class HostLogParser:
 
         event.event.dataset = "auditd"
         
+        # 填充主机信息 (尝试获取本机信息)
+        import platform
+        import socket
+        
+        try:
+            event.host.hostname = socket.gethostname()
+            event.host.name = event.host.hostname
+            event.host.os.family = platform.system().lower()
+            event.host.os.name = platform.system()
+            event.host.os.version = platform.release()
+            # event.host.ip 通常需要更复杂的网络获取逻辑，这里暂留空或获取本地IP
+            event.host.ip = [socket.gethostbyname(event.host.hostname)]
+        except:
+            pass
+            
         return event
+
+def write_event(event: UnifiedEvent, output_file: str = "output.json") -> bool:
+    """
+    实现 write_event() 接口
+    将统一事件写入文件 (模拟发送到消息队列或存储)
+    """
+    import json
+    try:
+        # 转换为字典 (ES 格式)
+        data = event.to_dict()
+        
+        # 写入文件 (追加模式)
+        with open(output_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False) + "\n")
+            
+        return True
+    except Exception as e:
+        print(f"[!] write_event failed: {e}")
+        return False
