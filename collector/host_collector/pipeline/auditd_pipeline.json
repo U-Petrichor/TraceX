@@ -8,10 +8,18 @@
       }
     },
     {
+      "gsub": {
+        "field": "kv_part",
+        "pattern": "[\\x1d]",
+        "replacement": " "
+      }
+    },
+    {
       "kv": {
         "field": "kv_part",
         "field_split": " ",
-        "value_split": "="
+        "value_split": "=",
+        "target_field": "kv"
       }
     },
     {

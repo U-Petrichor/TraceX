@@ -37,6 +37,20 @@ services:
       attack-range:
         ipv4_address: 172.20.0.100
 
+  # Wordpot: WordPress 蜜罐
+  wordpot:
+    image: dtagdevsec/wordpot:24.04.1
+    container_name: wordpot-honeypot
+    restart: always
+    ports:
+      - "8080:80"  # 模拟 Web 服务
+    volumes:
+      # 将日志挂载到项目标准路径
+      - /root/TraceX/infrastructure/range/honeypots/wordpot/logs:/var/log/wordpot
+    networks:
+      attack-range:
+        ipv4_address: 172.20.0.101 
+
 networks:
   attack-range:
     driver: bridge
