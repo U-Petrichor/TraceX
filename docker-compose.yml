@@ -37,6 +37,22 @@ services:
       attack-range:
         ipv4_address: 172.20.0.100
 
+  zeek:
+    image: zeek/zeek:latest
+    container_name: zeek-collector
+    # 必须使用 host 模式才能监听网卡流量
+    network_mode: host 
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      # 将生成的日志挂载出来，方便 Filebeat 或解析器读取
+      - zeek-logs:/opt/zeek/logs
+      # 挂载自定义配置文件
+      - ./collector/network_collector/zeek_config:/opt/zeek/etc
+    restart: always
+
+
   # Wordpot: WordPress 蜜罐
   wordpot:
     image: dtagdevsec/wordpot:24.04.1
@@ -57,3 +73,6 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/24
+
+volumes:
+  zeek-logs:
