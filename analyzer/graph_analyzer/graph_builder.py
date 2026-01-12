@@ -41,27 +41,17 @@ class EntityGraphBuilder:
             timestamp = event.get("@timestamp")
             
             # 场景 A: 进程创建子进程 (spawned)
-            # 条件: 存在 process 且存在 process.parent
-            proc = entity_map.get("process")
-            if proc and proc.get("role") != "parent":
-                # 在 extract 中我们可能提取了 parent 和 self，需要找到它们
-                # 这里为了简化，我们遍历实体列表找父子关系
-                parent_entity = None
-                child_entity = None
-                for e in entities:
-                    if e["type"] == "process":
-                        if e.get("role") == "parent":
-                            parent_entity = e
-                        else:
-                            child_entity = e
-                
-                if parent_entity and child_entity:
-                    edges.append({
-                        "source": parent_entity["id"],
-                        "target": child_entity["id"],
-                        "relation": "spawned",
-                        "timestamp": timestamp
-                    })
+            # 直接在实体列表中查找父进程和子进程，不依赖 entity_map (防止同类型覆盖)
+            parent_entity = next((e for e in entities if e["type"] == "process" and e.get("role") == "parent"), None)
+            child_entity = next((e for e in entities if e["type"] == "process" and e.get("role") != "parent"), None)
+            
+            if parent_entity and child_entity:
+                edges.append({
+                    "source": parent_entity["id"],
+                    "target": child_entity["id"],
+                    "relation": "spawned",
+                    "timestamp": timestamp
+                })
 
             # 场景 B: 进程操作文件 (accessed/created/deleted)
             # 条件: 存在 process 和 file
