@@ -140,7 +140,77 @@ class UnifiedEvent:
 
     @classmethod
     def from_dict(cls, data: dict) -> "UnifiedEvent":
-        """从字典创建"""
+        """从字典递归创建对象 (升级版)"""
+        if not data:
+            return cls()
+            
+        # 1. 处理时间戳名字差异
         if "@timestamp" in data:
             data["timestamp"] = data.pop("@timestamp")
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+            
+        # 2. 递归转换嵌套的 Dataclass
+        
+        # --- EventInfo ---
+        if isinstance(data.get("event"), dict):
+            data["event"] = EventInfo(**data["event"])
+            
+        # --- SourceInfo (包含 GeoInfo) ---
+        if isinstance(data.get("source"), dict):
+            src_data = data["source"]
+            # 处理 source.geo
+            if isinstance(src_data.get("geo"), dict):
+                geo_data = src_data["geo"]
+                # 处理 source.geo.location
+                if isinstance(geo_data.get("location"), dict):
+                    geo_data["location"] = GeoLocation(**geo_data["location"])
+                src_data["geo"] = GeoInfo(**geo_data)
+            data["source"] = SourceInfo(**src_data)
+
+        # --- DestinationInfo ---
+        if isinstance(data.get("destination"), dict):
+            data["destination"] = DestinationInfo(**data["destination"])
+            
+        # --- HostInfo (包含 HostOS) ---
+        if isinstance(data.get("host"), dict):
+            host_data = data["host"]
+            if isinstance(host_data.get("os"), dict):
+                host_data["os"] = HostOS(**host_data["os"])
+            data["host"] = HostInfo(**host_data)
+            
+        # --- ProcessInfo (包含 Parent 和 User) ---
+        if isinstance(data.get("process"), dict):
+            proc_data = data["process"]
+            if isinstance(proc_data.get("parent"), dict):
+                proc_data["parent"] = ProcessParent(**proc_data["parent"])
+            if isinstance(proc_data.get("user"), dict):
+                proc_data["user"] = ProcessUser(**proc_data["user"])
+            data["process"] = ProcessInfo(**proc_data)
+            
+        # --- FileInfo (包含 Hash) ---
+        if isinstance(data.get("file"), dict):
+            file_data = data["file"]
+            if isinstance(file_data.get("hash"), dict):
+                file_data["hash"] = FileHash(**file_data["hash"])
+            data["file"] = FileInfo(**file_data)
+            
+        # --- NetworkInfo ---
+        if isinstance(data.get("network"), dict):
+            data["network"] = NetworkInfo(**data["network"])
+            
+        # --- UserInfo ---
+        if isinstance(data.get("user"), dict):
+            data["user"] = UserInfo(**data["user"])
+            
+        # --- ThreatInfo (包含 Tactic 和 Technique) ---
+        if isinstance(data.get("threat"), dict):
+            threat_data = data["threat"]
+            if isinstance(threat_data.get("tactic"), dict):
+                threat_data["tactic"] = TacticInfo(**threat_data["tactic"])
+            if isinstance(threat_data.get("technique"), dict):
+                threat_data["technique"] = TechniqueInfo(**threat_data["technique"])
+            data["threat"] = ThreatInfo(**threat_data)
+
+        # 3. 创建主对象
+        # 过滤掉不在 dataclass 定义中的多余字段，防止报错
+        valid_keys = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        return cls(**valid_keys)
