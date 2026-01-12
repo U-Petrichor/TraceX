@@ -1,5 +1,5 @@
+# collector/common/schema.py
 """统一数据格式定义"""
-
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict
 from datetime import datetime
@@ -128,12 +128,12 @@ class UnifiedEvent:
     def to_dict(self) -> dict:
         """转换为字典（用于存入 ES）"""
         data = asdict(self)
-        if "@timestamp" not in data:
-            data["@timestamp"] = data.pop("timestamp")
+        data["@timestamp"] = data.pop("timestamp")
         return data
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "UnifiedEvent":
+        """从字典创建"""
         if "@timestamp" in data:
             data["timestamp"] = data.pop("@timestamp")
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})

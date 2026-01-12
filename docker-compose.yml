@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: es-container
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # 考虑到服务器配置，这里限制了内存
+    ports:
+      - "9200:9200"
+    networks:
+      - attack-range
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.9
+    container_name: kibana-container
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - attack-range
+
+networks:
+  attack-range:
+    driver: bridge
