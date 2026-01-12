@@ -126,3 +126,58 @@ def write_event(event: UnifiedEvent, output_file: str = "output.json") -> bool:
     except Exception as e:
         print(f"[!] write_event failed: {e}")
         return False
+
+if __name__ == "__main__":
+    import sys
+    import os
+    
+    # 简单的命令行测试入口
+    print("[-] Starting HostLogParser test...")
+    
+    # 默认审计日志路径
+    log_path = "/var/log/audit/audit.log"
+    if len(sys.argv) > 1:
+        log_path = sys.argv[1]
+        
+    if not os.path.exists(log_path):
+        print(f"[!] Log file not found: {log_path}")
+        # 如果是在非 Linux 环境测试，创建一个模拟文件
+        if os.name == 'nt': 
+            print("[*] Windows detected, skipping real audit log check.")
+        else:
+            sys.exit(1)
+    
+    parser = HostLogParser()
+    
+    try:
+        # 读取最后 5 行进行测试
+        print(f"[*] Reading last 5 lines from {log_path}...")
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()[-5:]
+            
+        success_count = 0
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            
+            print(f"[*] Parsing: {line[:50]}...")
+            raw = parser.parse_auditd_line(line)
+            if raw:
+                event = parser.to_unified_event(raw)
+                if event:
+                    if write_event(event, "test_output.json"):
+                        print(f"  [+] Event written to test_output.json")
+                        success_count += 1
+                    else:
+                        print(f"  [!] Failed to write event")
+                else:
+                    print(f"  [!] Failed to convert to UnifiedEvent")
+            else:
+                print(f"  [!] Failed to parse line")
+                
+        print(f"[-] Test finished. {success_count} events processed.")
+        
+    except PermissionError:
+        print("[!] Permission denied. Please run with sudo.")
+    except Exception as e:
+        print(f"[!] Error: {e}")
