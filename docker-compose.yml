@@ -23,6 +23,19 @@ services:
       - elasticsearch
     networks:
       - attack-range
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.9
+    container_name: filebeat-collector
+    user: root
+    volumes:
+      - ./config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - zeek-logs:/var/log/zeek:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - attack-range
+  
   cowrie:
     image: cowrie/cowrie:latest
     container_name: cowrie-honeypot
@@ -40,32 +53,14 @@ services:
   zeek:
     image: zeek/zeek:latest
     container_name: zeek-collector
-    # 必须使用 host 模式才能监听网卡流量
     network_mode: host 
     cap_add:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      # 将生成的日志挂载出来，方便 Filebeat 或解析器读取
       - zeek-logs:/opt/zeek/logs
-      # 挂载自定义配置文件
       - ./collector/network_collector/zeek_config:/opt/zeek/etc
     restart: always
-
-
-  # Wordpot: WordPress 蜜罐
-  wordpot:
-    image: dtagdevsec/wordpot:24.04.1
-    container_name: wordpot-honeypot
-    restart: always
-    ports:
-      - "8080:80"  # 模拟 Web 服务
-    volumes:
-      # 将日志挂载到项目标准路径
-      - /root/TraceX/infrastructure/range/honeypots/wordpot/logs:/var/log/wordpot
-    networks:
-      attack-range:
-        ipv4_address: 172.20.0.101 
 
 networks:
   attack-range:
@@ -76,3 +71,4 @@ networks:
 
 volumes:
   zeek-logs:
+  es-data:
