@@ -22,3 +22,9 @@ db-logs/
 internal-logs/
 dc-logs/
 infrastructure/range/honeypots/
+# 忽略 Elasticsearch 运行时产生的二进制数据
+data/elasticsearch/
+
+# 忽略 Cowrie 蜜罐产生的原始日志和状态文件
+infrastructure/range/honeypots/cowrie/var/log/
+infrastructure/range/honeypots/cowrie/var/lib/
