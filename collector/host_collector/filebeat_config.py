@@ -22,6 +22,13 @@ filebeat.inputs:
     - /var/log/messages
   pipeline: "syslog-pipeline"
 
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - add_cloud_metadata: ~
+  - add_docker_metadata: ~
+  - add_kubernetes_metadata: ~
+
 setup.ilm.enabled: false
 setup.template.name: "unified-logs"
 setup.template.pattern: "unified-logs-*"
