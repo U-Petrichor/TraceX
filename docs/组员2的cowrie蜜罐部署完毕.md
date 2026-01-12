@@ -1,7 +1,7 @@
 
 运行转换脚本
 
-`python3 /root/TraceX/collector/network_collector/flow_parser.py`
+`python3 /root/TraceX/collector/network_collector/flow_parser_cowrie.py`
 
 在本地模拟攻击
 
@@ -21,7 +21,7 @@ root@182.92.114.32: Permission denied (publickey,password).
 
 服务器端实时捕获日志并转为标准格式存入ES
 ```
-root@iZ2ze082hzl5s9xfijazalZ:~/TraceX# python3 /root/TraceX/collector/network_collector/flow_parser.py
+root@iZ2ze082hzl5s9xfijazalZ:~/TraceX# python3 /root/TraceX/collector/network_collector/flow_parser_cowrie.py
 开始解析蜜罐日志: /root/TraceX/infrastructure/range/honeypots/cowrie/var/log/cowrie/cowrie.json
 /usr/local/lib/python3.10/dist-packages/elasticsearch/connection/base.py:200: ElasticsearchWarning: Elasticsearch built-in security features are not enabled. Without authentication, your cluster could be accessible to anyone. See https://www.elastic.co/guide/en/elasticsearch/reference/7.17/security-minimal-setup.html to enable security.
   warnings.warn(message, category=ElasticsearchWarning)
