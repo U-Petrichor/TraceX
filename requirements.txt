@@ -1,0 +1,5 @@
+elasticsearch>=7.17.0
+requests
+pytest
+black
+flake8
