@@ -1,6 +1,3 @@
-
-
-
 import re
 from datetime import datetime
 from collector.common.schema import UnifiedEvent
