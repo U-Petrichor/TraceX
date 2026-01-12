@@ -23,18 +23,6 @@ services:
       - elasticsearch
     networks:
       - attack-range
-
-  filebeat:
-    image: docker.elastic.co/beats/filebeat:7.17.9
-    container_name: filebeat-collector
-    user: root
-    volumes:
-      - ./config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - zeek-logs:/var/log/zeek:ro
-    depends_on:
-      - elasticsearch
-    networks:
-      - attack-range
   
   cowrie:
     image: cowrie/cowrie:latest
@@ -45,7 +33,6 @@ services:
     volumes:
       - /root/TraceX/infrastructure/range/honeypots/cowrie/etc:/cowrie/cowrie-git/etc
       - /root/TraceX/infrastructure/range/honeypots/cowrie/var/log:/cowrie/cowrie-git/var/log
-      - /root/TraceX/infrastructure/range/honeypots/cowrie/var/lib:/cowrie/cowrie-git/var/lib
     networks:
       attack-range:
         ipv4_address: 172.20.0.100
@@ -58,7 +45,8 @@ services:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - zeek-logs:/opt/zeek/logs
+      # 将 Zeek 日志映射到宿主机，方便手动运行的 Python 脚本读取
+      - /root/TraceX/data/zeek-logs:/opt/zeek/logs
       - ./collector/network_collector/zeek_config:/opt/zeek/etc
     restart: always
 
@@ -68,7 +56,3 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/24
-
-volumes:
-  zeek-logs:
-  es-data:

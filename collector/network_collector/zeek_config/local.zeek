@@ -1,3 +1,5 @@
+# /root/TraceX/collector/network_collector/zeek_config/local.zeek
+
 # 开启 JSON 格式日志输出
 @load policy/tuning/json-logs.zeek
 
@@ -6,7 +8,9 @@
 @load protocols/dns/main
 @load protocols/http/main
 
-# 针对靶场环境的网卡进行监听 (假设网卡名为 eth0)
+# 禁用日志旋转（重要：确保手动运行的 parser 可以持续读取同一个文件）
+redef Log::default_rotation_interval = 0;
+
 event zeek_init() {
-    print "Zeek 网络流量监控已启动...";
+    print "Zeek 网络流量监控已启动，JSON 日志模式已开启...";
 }

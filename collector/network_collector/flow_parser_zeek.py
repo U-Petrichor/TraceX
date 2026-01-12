@@ -1,104 +1,95 @@
-# collector/network_collector/flow_parser.py
+# /root/TraceX/collector/network_collector/flow_parser_zeek.py
 
 import json
+import os
+import sys
+import time
 from datetime import datetime
-from collector.common.es_client import ESClient
-from collector.common.schema import (
-    UnifiedEvent, EventInfo, SourceInfo, DestinationInfo, 
-    NetworkInfo, HostInfo
-)
 
-class NetworkFlowParser:
-    """网络流量解析器：负责将 Zeek 等日志解析为统一范式并存储"""
+# 确保项目根目录在路径中
+sys.path.append('/root/TraceX')
+try:
+    from collector.common.es_client import ESClient
+    from collector.common.schema import (
+        UnifiedEvent, EventInfo, SourceInfo, DestinationInfo, 
+        NetworkInfo
+    )
+except ImportError:
+    print("错误: 无法加载公共模块，请检查目录结构")
+    sys.exit(1)
 
-    def __init__(self, es_hosts=["http://localhost:9200"]):
-        # 初始化公共 ES 客户端
-        self.es_client = ESClient(hosts=es_hosts)
+class ZeekParser:
+    def __init__(self):
+        # 手动测试时连接本地 ES
+        self.es_client = ESClient(hosts=["http://localhost:9200"])
+        # 指向 docker-compose 中映射的宿主机路径
+        self.log_path = "/root/TraceX/data/zeek-logs/current/conn.log"
 
-    def _format_timestamp(self, ts):
-        """处理 Zeek 浮点数时间戳为 ISO 格式"""
-        if isinstance(ts, (int, float)):
-            return datetime.utcfromtimestamp(ts).isoformat() + "Z"
-        return ts
-
-    def parse_zeek_conn(self, raw_data: dict) -> UnifiedEvent:
-        """
-        解析 Zeek conn.log 数据
-        """
-        # 1. 构建基础网络信息
-        network = NetworkInfo(
-            protocol=raw_data.get("proto", ""),
-            transport=raw_data.get("proto", ""),
-            application=raw_data.get("service", ""),
-            bytes=(raw_data.get("orig_bytes", 0) or 0) + (raw_data.get("resp_bytes", 0) or 0),
-            packets=(raw_data.get("orig_pkts", 0) or 0) + (raw_data.get("resp_pkts", 0) or 0),
-            direction="inbound"  # 默认标记，后续可根据 IP 范围调整
-        )
-
-        # 2. 构建事件元信息
-        event = EventInfo(
-            category="network",
-            type="connection",
-            action="network_flow",
-            outcome="success",
-            severity=3,
-            dataset="zeek.conn"
-        )
-
-        # 3. 映射源和目的
-        source = SourceInfo(
-            ip=raw_data.get("id.orig_h", ""),
-            port=raw_data.get("id.orig_p", 0)
-        )
-        destination = DestinationInfo(
-            ip=raw_data.get("id.resp_h", ""),
-            port=raw_data.get("id.resp_p", 0)
-        )
-
-        # 4. 封装为 UnifiedEvent 对象
-        unified_event = UnifiedEvent(
-            timestamp=self._format_timestamp(raw_data.get("ts")),
-            event=event,
-            source=source,
-            destination=destination,
-            network=network,
-            message=f"Network flow: {source.ip}:{source.port} -> {destination.ip}:{destination.port}",
-            raw=raw_data  # 保留原始数据以便溯源
-        )
-
-        return unified_event
-
-    def process_log_file(self, file_path: str, log_type: str = "conn"):
-        """
-        读取日志文件并批量写入 ES
-        """
-        events_to_write = []
+    def map_to_unified(self, raw_data: dict) -> dict:
+        """将 Zeek conn.log 转换为统一格式"""
         
-        try:
-            with open(file_path, 'r') as f:
-                for line in f:
-                    if line.startswith("#"): continue  # 跳过 Zeek 头部注释
-                    
-                    raw_data = json.loads(line)
-                    
-                    if log_type == "conn":
-                        unified_obj = self.parse_zeek_conn(raw_data)
-                        # 转换为字典格式用于写入
-                        events_to_write.append(unified_obj.to_dict())
+        # 处理时间戳
+        ts = raw_data.get("ts")
+        iso_ts = datetime.utcfromtimestamp(ts).isoformat() + "Z" if ts else datetime.utcnow().isoformat() + "Z"
 
-            # 调用公共 ESClient 批量写入接口
-            if events_to_write:
-                result = self.es_client.write_events_bulk(
-                    events_to_write, 
-                    index_prefix="network-flows"
-                )
-                print(f"成功处理 {result['success']} 条记录，失败 {result['failed']} 条。")
+        # 构建对象
+        event_obj = UnifiedEvent(
+            timestamp=iso_ts,
+            event=EventInfo(
+                category="network",
+                type="connection",
+                action="network_flow",
+                outcome="success",
+                severity=3,
+                dataset="zeek.conn"
+            ),
+            source=SourceInfo(
+                ip=raw_data.get("id.orig_h", ""),
+                port=raw_data.get("id.orig_p", 0)
+            ),
+            destination=DestinationInfo(
+                ip=raw_data.get("id.resp_h", ""),
+                port=raw_data.get("id.resp_p", 0)
+            ),
+            network=NetworkInfo(
+                protocol=raw_data.get("proto", ""),
+                transport=raw_data.get("proto", ""),
+                application=raw_data.get("service", ""),
+                bytes=(raw_data.get("orig_bytes", 0) or 0) + (raw_data.get("resp_bytes", 0) or 0),
+                packets=(raw_data.get("orig_pkts", 0) or 0) + (raw_data.get("resp_pkts", 0) or 0)
+            ),
+            message=f"Zeek Flow: {raw_data.get('id.orig_h')} -> {raw_data.get('id.resp_h')}",
+            raw=raw_data
+        )
+        return event_obj.to_dict()
+
+    def start_monitoring(self):
+        """实时监听并解析"""
+        if not os.path.exists(self.log_path):
+            print(f"[*] 等待 Zeek 生成日志文件: {self.log_path}")
+            while not os.path.exists(self.log_path):
+                time.sleep(1)
+
+        print(f"[*] 开始监控 Zeek 流量数据...")
+        with open(self.log_path, "r") as f:
+            # 移动到文件末尾，只处理新数据
+            f.seek(0, 2)
+            while True:
+                line = f.readline()
+                if not line:
+                    time.sleep(0.5)
+                    continue
                 
-        except Exception as e:
-            print(f"处理日志文件时出错: {e}")
+                try:
+                    raw_log = json.loads(line)
+                    unified_data = self.map_to_unified(raw_log)
+                    
+                    # 写入 ES
+                    self.es_client.write_event(unified_data, index_prefix="network-flows")
+                    print(f"[OK] 已解析流量: {unified_data['source']['ip']} -> {unified_data['destination']['ip']}")
+                except Exception as e:
+                    print(f"[Error] 解析失败: {e}")
 
-# 使用示例
 if __name__ == "__main__":
-    parser = NetworkFlowParser()
-    # 假设 Zeek 日志已通过 Filebeat 或其他方式同步到本地
-    # parser.process_log_file("/var/log/zeek/current/conn.log")
+    parser = ZeekParser()
+    parser.start_monitoring()
