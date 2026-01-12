@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Logs & Data (防止大文件上传)
+*.log
+es-data/
+zeek-logs/
+web-logs/
+db-logs/
+internal-logs/
+dc-logs/
