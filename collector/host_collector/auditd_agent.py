@@ -2,7 +2,11 @@ import time
 import os
 import sys
 import json
+import warnings
 from datetime import datetime
+
+# Suppress ES security warnings
+warnings.filterwarnings("ignore", message=".*Elasticsearch built-in security features are not enabled.*")
 
 # === Imports Setup ===
 current_dir = os.path.dirname(os.path.abspath(__file__))
