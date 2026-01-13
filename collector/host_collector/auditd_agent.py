@@ -224,10 +224,47 @@ def main():
                     doc = event.to_dict()
                     doc = clean_dict(doc)
                     
-                    # Display Optimization
+                    # === Display & Filtering Logic ===
+                    # 1. 定义噪音进程黑名单
+                    NOISE_PROCS = ['sleep', 'date', 'uptime', 'sed', 'awk', 'head', 'tail', 'cut', 'tr']
+                    
+                    # 提取关键字段
+                    process = doc.get('process', {})
+                    proc_name = process.get('name', '')
+                    cmd_line = process.get('command_line', '')
                     summary = get_display_summary(doc)
                     event_time = doc.get('@timestamp', 'Unknown Time')
-                    print(f"[+] [{event_time}] Smart Event: {summary}")
+
+                    # 2. 第一层过滤：丢弃噪音
+                    # 如果进程在黑名单中，或者命令行包含 /proc/ 读取操作，则不打印
+                    if proc_name in NOISE_PROCS or '/proc/' in cmd_line:
+                        # Skip printing, but still write to ES (or continue to write)
+                        pass
+                    
+                    # 3. 第二层判断：高亮高危
+                    else:
+                        # ANSI Colors
+                        RED = '\033[91m'
+                        YELLOW = '\033[93m'
+                        CYAN = '\033[96m'
+                        RESET = '\033[0m'
+
+                        # Rule A: Sensitive Files (Red)
+                        if any(s in cmd_line for s in ['/etc/passwd', '.ssh', 'shadow']):
+                            print(f"{RED}[!] 🛑 SENSITIVE: {summary}{RESET}")
+                        
+                        # Rule B: Failed Operations (Yellow)
+                        elif doc.get('event', {}).get('outcome') == 'failure':
+                            print(f"{YELLOW}[?] ⚠️ FAILED: {summary}{RESET}")
+                        
+                        # Rule C: Root Operations (Cyan)
+                        # Check uid in user object or raw fields
+                        elif str(doc.get('user', {}).get('id')) == '0':
+                            print(f"{CYAN}[*] ⚡ ROOT: {summary}{RESET}")
+                        
+                        # 4. 第三层兜底：普通打印
+                        else:
+                            print(f"[+] CMD: {summary}")
                     
                     try:
                         es.index(index=index_name, document=doc)
