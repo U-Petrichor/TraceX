@@ -230,6 +230,10 @@ class HostLogParser:
             event.process.name = main_record.get("comm", "unknown")
             event.process.executable = main_record.get("exe", "")
             
+            # [Updated for Schema v4.0] 填充 start_time
+            # 使用 auditd 的时间戳作为进程启动时间基准
+            event.process.start_time = event.timestamp
+
             # 命令行重组 (从 EXECVE args)
             if execve_record:
                 # 提取所有 a0, a1, a2... 参数
@@ -261,8 +265,13 @@ class HostLogParser:
                 if event.file.path:
                     event.file.name = event.file.path.split("/")[-1]
                     event.event.category = "file" # 如果有文件操作，也可以标记为 file? 或者是混合
-                    # 根据 SYSCALL 类型决定 event.action? 
-                    # 比如 syscall=2 (open) -> file access. 但为了简化，暂保持 process_started 或根据 syscall 映射
+                    
+                    # [Updated for Schema v4.0] MetaData: 图抽象
+                    # 简单示例: 如果文件在 /tmp 下，标记为 TEMP_FILE
+                    if event.file.path.startswith("/tmp"):
+                        event.metadata.atlas_label = "TEMP_FILE"
+                    elif event.file.path.endswith(".php") or event.file.path.endswith(".sh"):
+                        event.metadata.atlas_label = "SCRIPT_EXEC"
         
         # 2. 登录事件
         elif audit_type in ["USER_LOGIN", "USER_AUTH"]:
@@ -276,6 +285,17 @@ class HostLogParser:
             event.event.action = audit_type
 
         event.event.dataset = "auditd"
+
+        # [Updated for Schema v4.0] 初始化 DetectionInfo (默认为空，等待 Analyzer 填充)
+        # 但可以在这里预留或根据简单规则填充
+        # 例如: 如果是 USER_LOGIN 失败，标记 severity
+        if main_record.get("res") == "failed" or main_record.get("result") == "fail":
+             event.event.outcome = "failure"
+             event.detection.severity = "low" # 简单登录失败
+        else:
+             event.event.outcome = "success"
+        
+        # 填充主机信息
         
         # 填充主机信息
         import platform
