@@ -183,11 +183,17 @@ class TestHostCollector(unittest.TestCase):
             # 查询最近的日志
             # 注意：process.name 在 ES 中可能是 "cat" 也可能是 "/usr/bin/cat"，且 Pipeline 可能会带引号
             # 使用更宽泛的查询条件：process.name 包含 cat 且 event.dataset 为 auditd
+            # 增加时间范围限制，避免查到历史数据或被大量网络日志淹没
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            start_time = (now - timedelta(minutes=5)).isoformat() + "Z"
+            
             query = {
                 "bool": {
                     "must": [
                         {"match": {"event.dataset": "auditd"}},
-                        {"wildcard": {"process.name": "*cat*"}}
+                        {"wildcard": {"process.name": "*cat*"}},
+                        {"range": {"@timestamp": {"gte": start_time}}}
                     ]
                 }
             }
@@ -200,10 +206,21 @@ class TestHostCollector(unittest.TestCase):
                 print(f"[Debug] 实际 process.name: {actual_name}")
             else:
                 print("[Warn] 未能在 ES 中找到刚才的 'cat' 操作日志，请检查 Filebeat 容器状态")
-                print("[Debug] 尝试查询所有最近的 auditd 日志进行排查:")
-                debug_res = self.es.search(index="unified-logs-*", q="event.dataset:auditd", size=3, sort=[{"@timestamp": "desc"}])
+                print("[Debug] 尝试查询最近5分钟的所有 auditd 日志进行排查:")
+                debug_query = {
+                    "bool": {
+                        "must": [
+                            {"match": {"event.dataset": "auditd"}},
+                            {"range": {"@timestamp": {"gte": start_time}}}
+                        ]
+                    }
+                }
+                debug_res = self.es.search(index="unified-logs-*", query=debug_query, size=3, sort=[{"@timestamp": "desc"}])
                 for hit in debug_res['hits']['hits']:
                     print(f" - Found log: {hit['_source'].get('process', {}).get('name', 'Unknown')} @ {hit['_source'].get('@timestamp')}")
+                
+                if debug_res['hits']['total']['value'] == 0:
+                     print(" [Debug] 最近5分钟内没有查询到任何 auditd 日志，可能是 Filebeat 未工作或时区问题")
                 # 这里不强制 fail，因为可能是延时问题
         except Exception as e:
             print(f"[Warn] 模拟操作失败: {e}")

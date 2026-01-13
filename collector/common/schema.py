@@ -136,14 +136,7 @@ class UnifiedEvent:
         """转换为字典（用于存入 ES）"""
         data = asdict(self)
         data["@timestamp"] = data.pop("timestamp")
-        
-        # 递归清理空字符串，避免 ES 类型映射错误 (如 IP 字段不允许空字符串)
-        def clean_data(d):
-            if isinstance(d, dict):
-                return {k: clean_data(v) for k, v in d.items() if v != ""}
-            return d
-            
-        return clean_data(data)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "UnifiedEvent":
