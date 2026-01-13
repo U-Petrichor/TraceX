@@ -144,24 +144,31 @@ class TestHostCollector(unittest.TestCase):
             self.fail(f"ESClient 写入失败: {e}")
 
     def test_05_log_parser_logic(self):
-        """测试: LogParser 核心解析逻辑 (模拟 Auditd 日志)"""
+        """测试: LogParser 核心解析逻辑 (模拟 Auditd 日志聚合)"""
         print("\n[Info] 开始验证 LogParser 解析逻辑...")
         
         parser = HostLogParser()
-        # 模拟一条 Auditd EXECVE 日志
-        mock_line = 'type=EXECVE msg=audit(1610000000.123:100): argc=2 a0="cat" a1="/etc/passwd" pid=1234 comm="cat" exe="/bin/cat" uid=0 auid=1000'
+        # 模拟多行 Auditd 日志 (SYSCALL + EXECVE + EOE)
+        # 注意: 只有遇到 EOE 或新 ID 时才会触发聚合返回
+        logs = [
+            'type=SYSCALL msg=audit(1610000000.123:100): arch=c000003e syscall=59 success=yes exit=0 a0=... pid=1234 comm="cat" exe="/bin/cat" uid=0 auid=1000',
+            'type=EXECVE msg=audit(1610000000.123:100): argc=2 a0="cat" a1="/etc/passwd"',
+            'type=EOE msg=audit(1610000000.123:100):'
+        ]
         
-        raw = parser.parse_auditd_line(mock_line)
-        self.assertIsNotNone(raw, "解析失败: 返回 None")
-        self.assertEqual(raw['audit_id'], "100", "Event ID 提取错误")
-        
-        event = parser.to_unified_event(raw)
-        self.assertIsNotNone(event, "转换 UnifiedEvent 失败")
+        event = None
+        for line in logs:
+            result = parser.parse(line, log_type="auditd")
+            if result:
+                event = result
+                
+        self.assertIsNotNone(event, "解析失败: 未能聚合事件")
         self.assertEqual(event.process.pid, 1234, "PID 提取错误")
         self.assertEqual(event.process.name, "cat", "进程名提取错误")
         self.assertEqual(event.event.category, "process", "事件类别错误")
+        self.assertEqual(event.process.command_line, "cat /etc/passwd", "命令行重组错误")
         
-        print("[Pass] LogParser 逻辑验证通过")
+        print("[Pass] LogParser 聚合逻辑验证通过")
 
     def test_06_host_behavior_simulation(self):
         """测试: 模拟主机行为并验证采集 (自动化触发)"""
