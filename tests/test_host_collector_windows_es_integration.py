@@ -38,7 +38,8 @@ class TestWindowsESIntegration(unittest.TestCase):
             
         self.parser = HostLogParser()
         # Use the specific index name requested for presentation
-        self.index_name = "host-security-logs"
+        # Dynamic index name: unified-logs-{YYYY.MM.DD}
+        self.index_name = f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
 
     def test_ingest_real_data(self):
         """Ingest real simulation data for presentation (Persisted)"""
