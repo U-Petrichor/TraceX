@@ -20,7 +20,7 @@ class ESClient:
         
         date_str = datetime.utcnow().strftime("%Y.%m.%d")
         index_name = f"{index_prefix}-{date_str}"
-        result = self.es.index(index=index_name, body=event)
+        result = self.es.index(index=index_name, document=event)
         return event["event"]["id"]
     
     def write_events_bulk(self, events: list, index_prefix: str = "unified-logs") -> dict:
@@ -57,6 +57,6 @@ class ESClient:
         
         result = self.es.search(
             index=f"{index_prefix}-*",
-            body={"query": query, "size": size, "sort": [{"@timestamp": "asc"}]}
+            query=query, size=size, sort=[{"@timestamp": "asc"}]
         )
         return [hit["_source"] for hit in result["hits"]["hits"]]
