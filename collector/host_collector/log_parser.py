@@ -176,7 +176,7 @@ class HostLogParser:
             if "=" in token:
                 try:
                     k, v = token.split("=", 1)
-                    kv_pairs[k] = v.strip('"')
+                    kv_pairs[k] = v.strip('"\'')
                 except:
                     continue
         
