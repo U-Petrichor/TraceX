@@ -1,7 +1,13 @@
 # collector/common/schema.py
-"""统一数据格式定义"""
+"""
+统一数据格式定义 v4.0 (Final)
+变更记录:
+- 新增 MetaData 用于 ATLAS 图抽象
+- 新增 DetectionInfo 用于 Sigma 规则名存储
+- 增加 get_start_time_ms 辅助方法
+"""
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
@@ -61,6 +67,8 @@ class ProcessInfo:
     command_line: str = ""
     parent: ProcessParent = field(default_factory=ProcessParent)
     user: ProcessUser = field(default_factory=ProcessUser)
+    # 原始启动时间字符串，用于生成唯一 ID
+    start_time: str = "" 
 
 @dataclass
 class FileHash:
@@ -106,6 +114,23 @@ class ThreatInfo:
     tactic: TacticInfo = field(default_factory=TacticInfo)
     technique: TechniqueInfo = field(default_factory=TechniqueInfo)
 
+# --- v4.0 新增类 Start ---
+
+@dataclass
+class MetaData:
+    """v4.0 新增: 用于图计算和溯源分析的元数据"""
+    atlas_label: str = ""     # ATLAS 抽象标签 (如 TEMP_FILE, WEBSHELL)
+    path_signature: str = ""  # 路径签名，用于 NODOZE 频率分析
+
+@dataclass
+class DetectionInfo:
+    """v4.0 新增: 存储 Sigma/IDS 具体检测结果"""
+    rules: List[str] = field(default_factory=list) # 命中的具体规则名称 (如 "Suspicious Curl")
+    confidence: float = 0.0                        # 置信度 0.0 - 1.0
+    severity: str = ""                             # low, medium, high, critical
+
+# --- v4.0 新增类 End ---
+
 @dataclass
 class EventInfo:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -118,7 +143,7 @@ class EventInfo:
 
 @dataclass
 class UnifiedEvent:
-    """统一事件格式"""
+    """统一事件格式 v4.0"""
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     event: EventInfo = field(default_factory=EventInfo)
     source: SourceInfo = field(default_factory=SourceInfo)
@@ -132,15 +157,28 @@ class UnifiedEvent:
     message: str = ""
     raw: Dict = field(default_factory=dict)
     
+    # v4.0 新增字段
+    metadata: MetaData = field(default_factory=MetaData)
+    detection: DetectionInfo = field(default_factory=DetectionInfo)
+    
     def to_dict(self) -> dict:
         """转换为字典（用于存入 ES）"""
         data = asdict(self)
         data["@timestamp"] = data.pop("timestamp")
         return data
+    
+    def get_start_time_ms(self) -> str:
+        """
+        v4.0 辅助方法: 获取用于生成唯一 ID 的时间基准
+        优先使用 process.start_time，否则降级使用 @timestamp
+        """
+        if self.process.start_time:
+            return self.process.start_time
+        return self.timestamp
 
     @classmethod
     def from_dict(cls, data: dict) -> "UnifiedEvent":
-        """从字典递归创建对象 (升级版)"""
+        """从字典递归创建对象 (v4.0 增强版)"""
         if not data:
             return cls()
             
@@ -150,67 +188,65 @@ class UnifiedEvent:
             
         # 2. 递归转换嵌套的 Dataclass
         
-        # --- EventInfo ---
-        if isinstance(data.get("event"), dict):
-            data["event"] = EventInfo(**data["event"])
-            
-        # --- SourceInfo (包含 GeoInfo) ---
-        if isinstance(data.get("source"), dict):
-            src_data = data["source"]
-            # 处理 source.geo
-            if isinstance(src_data.get("geo"), dict):
-                geo_data = src_data["geo"]
-                # 处理 source.geo.location
-                if isinstance(geo_data.get("location"), dict):
-                    geo_data["location"] = GeoLocation(**geo_data["location"])
-                src_data["geo"] = GeoInfo(**geo_data)
-            data["source"] = SourceInfo(**src_data)
+        # Helper function for safe conversion
+        def safe_convert(field_name, target_cls, parent_data):
+            if isinstance(parent_data.get(field_name), dict):
+                # 递归处理 deeper nested dicts specifically for known structures
+                # (这里简化处理，依赖 target_cls 的 __init__ 能接收 dict)
+                # 针对特定嵌套较深的类进行特殊处理:
+                sub_data = parent_data[field_name]
+                
+                if field_name == "source":
+                     if isinstance(sub_data.get("geo"), dict):
+                        geo_data = sub_data["geo"]
+                        if isinstance(geo_data.get("location"), dict):
+                            geo_data["location"] = GeoLocation(**geo_data["location"])
+                        sub_data["geo"] = GeoInfo(**geo_data)
 
-        # --- DestinationInfo ---
-        if isinstance(data.get("destination"), dict):
-            data["destination"] = DestinationInfo(**data["destination"])
-            
-        # --- HostInfo (包含 HostOS) ---
-        if isinstance(data.get("host"), dict):
-            host_data = data["host"]
-            if isinstance(host_data.get("os"), dict):
-                host_data["os"] = HostOS(**host_data["os"])
-            data["host"] = HostInfo(**host_data)
-            
-        # --- ProcessInfo (包含 Parent 和 User) ---
-        if isinstance(data.get("process"), dict):
-            proc_data = data["process"]
-            if isinstance(proc_data.get("parent"), dict):
-                proc_data["parent"] = ProcessParent(**proc_data["parent"])
-            if isinstance(proc_data.get("user"), dict):
-                proc_data["user"] = ProcessUser(**proc_data["user"])
-            data["process"] = ProcessInfo(**proc_data)
-            
-        # --- FileInfo (包含 Hash) ---
-        if isinstance(data.get("file"), dict):
-            file_data = data["file"]
-            if isinstance(file_data.get("hash"), dict):
-                file_data["hash"] = FileHash(**file_data["hash"])
-            data["file"] = FileInfo(**file_data)
-            
-        # --- NetworkInfo ---
-        if isinstance(data.get("network"), dict):
-            data["network"] = NetworkInfo(**data["network"])
-            
-        # --- UserInfo ---
-        if isinstance(data.get("user"), dict):
-            data["user"] = UserInfo(**data["user"])
-            
-        # --- ThreatInfo (包含 Tactic 和 Technique) ---
-        if isinstance(data.get("threat"), dict):
-            threat_data = data["threat"]
-            if isinstance(threat_data.get("tactic"), dict):
-                threat_data["tactic"] = TacticInfo(**threat_data["tactic"])
-            if isinstance(threat_data.get("technique"), dict):
-                threat_data["technique"] = TechniqueInfo(**threat_data["technique"])
-            data["threat"] = ThreatInfo(**threat_data)
+                elif field_name == "host":
+                    if isinstance(sub_data.get("os"), dict):
+                        sub_data["os"] = HostOS(**sub_data["os"])
+                
+                elif field_name == "process":
+                    if isinstance(sub_data.get("parent"), dict):
+                        sub_data["parent"] = ProcessParent(**sub_data["parent"])
+                    if isinstance(sub_data.get("user"), dict):
+                        sub_data["user"] = ProcessUser(**sub_data["user"])
+
+                elif field_name == "file":
+                    if isinstance(sub_data.get("hash"), dict):
+                        sub_data["hash"] = FileHash(**sub_data["hash"])
+                
+                elif field_name == "threat":
+                    if isinstance(sub_data.get("tactic"), dict):
+                        sub_data["tactic"] = TacticInfo(**sub_data["tactic"])
+                    if isinstance(sub_data.get("technique"), dict):
+                        sub_data["technique"] = TechniqueInfo(**sub_data["technique"])
+                
+                # 直接转换
+                try:
+                    # 过滤掉不在 dataclass 定义中的多余字段
+                    valid_sub_keys = {k: v for k, v in sub_data.items() if k in target_cls.__dataclass_fields__}
+                    parent_data[field_name] = target_cls(**valid_sub_keys)
+                except Exception:
+                    # 如果转换失败（例如字段不匹配），保留空对象或默认值
+                    parent_data[field_name] = target_cls()
+
+        # 执行转换
+        safe_convert("event", EventInfo, data)
+        safe_convert("source", SourceInfo, data)
+        safe_convert("destination", DestinationInfo, data)
+        safe_convert("host", HostInfo, data)
+        safe_convert("process", ProcessInfo, data)
+        safe_convert("file", FileInfo, data)
+        safe_convert("network", NetworkInfo, data)
+        safe_convert("user", UserInfo, data)
+        safe_convert("threat", ThreatInfo, data)
+        
+        # --- v4.0 新增字段转换 ---
+        safe_convert("metadata", MetaData, data)
+        safe_convert("detection", DetectionInfo, data)
 
         # 3. 创建主对象
-        # 过滤掉不在 dataclass 定义中的多余字段，防止报错
         valid_keys = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         return cls(**valid_keys)
