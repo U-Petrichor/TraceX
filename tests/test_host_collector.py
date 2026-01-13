@@ -360,5 +360,42 @@ class TestHostCollector(unittest.TestCase):
              
         print("[Pass] Severity 评分逻辑验证通过")
 
+    def test_08_session_reconstruction(self):
+        """测试: 验证会话重建逻辑 (Session IP Caching)"""
+        self._print_header("Test 08: Session Reconstruction")
+        
+        parser = HostLogParser()
+        
+        # 1. 模拟登录 (USER_LOGIN) - Session 1001 来自 192.168.1.50
+        log_login = 'type=USER_LOGIN msg=audit(1616450000.123:301): pid=2000 uid=0 auid=0 ses=1001 msg=\'op=login id=1000 exe="/usr/sbin/sshd" hostname=? addr=192.168.1.50 terminal=ssh res=success\''
+        flush_login = 'type=EOE msg=audit(1616450000.123:301):'
+        
+        parser.parse(log_login, log_type="auditd")
+        event_login = parser.parse(flush_login, log_type="auditd")
+        
+        if event_login:
+            print(f"  > Login Event: Session={event_login.user.session_id}, IP={event_login.source.ip}")
+            self.assertEqual(event_login.user.session_id, "1001", "Session ID 提取失败")
+            self.assertEqual(event_login.source.ip, "192.168.1.50", "Source IP 提取失败")
+        else:
+            self.fail("Login Event parse failed")
+
+        # 2. 模拟后续命令 (SYSCALL) - Session 1001 执行 'whoami'
+        # 注意: 原始日志里没有 addr 字段
+        log_cmd = 'type=SYSCALL msg=audit(1616450010.123:302): arch=c000003e syscall=59 success=yes exit=0 a0=... ppid=2000 pid=2001 auid=0 uid=0 ses=1001 comm="whoami" exe="/usr/bin/whoami" key=(null)'
+        flush_cmd = 'type=EOE msg=audit(1616450010.123:302):'
+        
+        parser.parse(log_cmd, log_type="auditd")
+        event_cmd = parser.parse(flush_cmd, log_type="auditd")
+        
+        if event_cmd:
+            print(f"  > Command Event: Session={event_cmd.user.session_id}, Enriched IP={event_cmd.source.ip}")
+            self.assertEqual(event_cmd.user.session_id, "1001", "Command Session ID 提取失败")
+            self.assertEqual(event_cmd.source.ip, "192.168.1.50", "未能从 Session Cache 回填 IP (Context Loss)")
+        else:
+            self.fail("Command Event parse failed")
+            
+        print("[Pass] 会话重建与 IP 回填验证通过")
+
 if __name__ == '__main__':
     unittest.main()

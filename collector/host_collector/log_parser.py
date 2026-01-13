@@ -8,6 +8,11 @@ class HostLogParser:
     def __init__(self):
         self._audit_buffer = {}
         self._last_audit_id = None
+        # v4.1 Session Cache: {session_id: source_ip}
+        # 用于将登录时的源 IP 关联到后续的操作事件
+        self._session_cache = {}
+        # 限制缓存大小，防止内存泄漏 (简单的 FIFO 策略可通过 OrderedDict 实现，这里用简单清理策略)
+        self._cache_max_size = 1000
 
     def parse(self, raw_data, log_type: str = "auditd") -> UnifiedEvent:
         """
@@ -258,6 +263,14 @@ class HostLogParser:
             event.user.id = main_record.get("uid", "")
             event.user.name = main_record.get("auid", "")
             
+            # [v4.1] Session Enrichment
+            session_id = main_record.get("ses", "")
+            if session_id and session_id != "4294967295": # 排除 unset (-1)
+                event.user.session_id = session_id
+                # 尝试从缓存回填源 IP
+                if session_id in self._session_cache:
+                    event.source.ip = self._session_cache[session_id]
+
             # 文件路径 (从 PATH 记录)
             # 寻找 nametype=NORMAL 的记录
             path_record = next((r for r in records if r.get("type") == "PATH" and r.get("nametype") == "NORMAL"), None)
@@ -280,6 +293,21 @@ class HostLogParser:
             event.event.action = "login"
             event.user.id = main_record.get("id", "")
             event.source.ip = main_record.get("addr", "localhost")
+            
+            # [v4.1] 记录 Session Cache
+            session_id = main_record.get("ses", "")
+            if session_id and session_id != "4294967295":
+                event.user.session_id = session_id
+                
+                # 只有登录成功的才记录 IP 关联 (或者失败的也记录? 通常 ses 是登录后分配的)
+                # USER_LOGIN 有时在分配 ses 之前，有时之后。
+                # 如果有有效 IP 且非本地，则记录
+                if event.source.ip and event.source.ip not in ["?", "localhost", "127.0.0.1"]:
+                    # 简单缓存清理: 如果太大了，清空一半 (LRU 太复杂，这里用随机清理或清空)
+                    if len(self._session_cache) > self._cache_max_size:
+                        self._session_cache.clear() # 简单粗暴，生产环境可优化
+                    
+                    self._session_cache[session_id] = event.source.ip
             
         else:
             event.event.category = "host"

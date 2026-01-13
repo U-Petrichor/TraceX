@@ -97,6 +97,8 @@ class UserInfo:
     name: str = ""
     id: str = ""
     domain: str = ""
+    # UPDATE-01-14-0619.md
+    session_id: str = "" 
 
 @dataclass
 class TacticInfo:
