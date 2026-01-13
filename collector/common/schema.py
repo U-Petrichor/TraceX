@@ -144,6 +144,8 @@ class EventInfo:
 @dataclass
 class UnifiedEvent:
     """统一事件格式 v4.0"""
+    # 注意：本项目统一采用北京时间 (UTC+8)，但在数据层仍存储为 ISO8601 UTC 格式以便于 ES 索引
+    # 业务层应显式传入北京时间转换后的 UTC 时间
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
     event: EventInfo = field(default_factory=EventInfo)
     source: SourceInfo = field(default_factory=SourceInfo)

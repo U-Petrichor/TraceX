@@ -120,11 +120,14 @@ def main():
         sys.exit(1)
 
     parser = HostLogParser()
-    index_name = f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
+    # Use Beijing Time (UTC+8) for index naming
+    from datetime import timedelta
+    beijing_time = datetime.utcnow() + timedelta(hours=8)
+    index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
     
     print(f"[*] Monitoring log file: {LOG_FILE}")
     print(f"[*] State file: {STATE_FILE}")
-    print(f"[*] Target Index: {index_name}")
+    print(f"[*] Target Index: {index_name} (Beijing Time)")
 
     # Wait for log file to exist
     while not os.path.exists(LOG_FILE):

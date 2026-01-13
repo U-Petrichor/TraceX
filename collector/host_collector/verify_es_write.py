@@ -27,10 +27,11 @@ def verify_es_write():
         
         print("[+] Connected to ES successfully.")
         
-        # Test Index Name logic same as agent
-        today_str = datetime.utcnow().strftime('%Y.%m.%d')
-        index_name = f"unified-logs-{today_str}"
-        print(f"[*] Target Index (Agent Logic): {index_name}")
+        # Test Index Name logic same as agent (Beijing Time UTC+8)
+        from datetime import timedelta
+        beijing_time = datetime.utcnow() + timedelta(hours=8)
+        index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
+        print(f"[*] Target Index (Agent Logic): {index_name} (Beijing Time)")
         
         # Test Document
         test_doc = {
@@ -53,17 +54,16 @@ def verify_es_write():
         print(f"[+] Index: {res['_index']}")
         
         print("\n[*] Verifying data readability...")
-        time.sleep(1) # Allow ES to refresh
+        time.sleep(2) # Increased delay to allow ES refresh
         
         # Search back
+        # Fix: Use query parameter instead of body for newer elasticsearch-py versions
         query = {
-            "query": {
-                "match": {
-                    "_id": res['_id']
-                }
+            "match": {
+                "_id": res['_id']
             }
         }
-        search_res = es.search(index=index_name, body=query)
+        search_res = es.search(index=index_name, query=query)
         hits = search_res['hits']['hits']
         
         if len(hits) > 0:
