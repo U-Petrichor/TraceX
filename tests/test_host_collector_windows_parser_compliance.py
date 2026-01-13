@@ -12,7 +12,7 @@ if project_root not in sys.path:
 from collector.host_collector.log_parser import HostLogParser
 from collector.common.schema import UnifiedEvent
 
-class TestWindowsLogParser(unittest.TestCase):
+class TestWindowsParserCompliance(unittest.TestCase):
     
     def setUp(self):
         self.parser = HostLogParser()
