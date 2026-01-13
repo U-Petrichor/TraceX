@@ -55,7 +55,7 @@ class TimelineCorrelator:
         
         for event in sorted_events:
             # === 步骤 A: ATT&CK 映射 ===
-            mapping_result = self.mapper.map_to_attack(event)
+            mapping_result = self.mapper.map_event(event)
             
             if mapping_result["matched"]:
                 # === 步骤 B: 按照 Schema 规范回填数据 ===
