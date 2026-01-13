@@ -24,20 +24,18 @@ except ImportError:
 
 # === Configuration ===
 LOG_FILE = "/var/log/audit/audit.log"
-# Shared state file for mutex lock
 STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
+ENABLE_ES_WRITE = True
 
 # === State & Lock Management ===
-
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {}
     try:
         with open(STATE_FILE, 'r') as f:
             return json.load(f)
-    except Exception as e:
-        print(f"[-] Error loading state: {e}")
+    except:
         return {}
 
 def save_state(inode, offset, is_running, pid):
@@ -53,48 +51,33 @@ def save_state(inode, offset, is_running, pid):
         print(f"[-] Error saving state: {e}")
 
 def acquire_lock():
-    """
-    Check lock status and acquire if free or stale.
-    Returns: (inode, offset) from the state file.
-    """
     state = load_state()
     is_running = state.get("is_running", False)
     lock_pid = state.get("pid", -1)
-    
     current_pid = os.getpid()
     
     if is_running:
-        # Check if the process holding the lock is actually alive
         try:
-            os.kill(lock_pid, 0) # Signal 0 does not send anything, just checks existence
-            # If we are here, the process exists
-            print(f"[-] Error: Another Agent (PID: {lock_pid}) is running. Please stop it first.")
+            os.kill(lock_pid, 0)
+            print(f"[-] Error: Agent already running (PID: {lock_pid}).")
             sys.exit(1)
         except OSError:
-            # Process does not exist (Zombie lock)
-            print(f"[!] Warning: Detected stale lock from PID {lock_pid}. Auto-cleaning...")
+            print(f"[!] Warning: Stale lock (PID {lock_pid}) detected. Taking over.")
     
-    # Preserve existing progress
     inode = state.get("inode")
     offset = state.get("offset", 0)
-    
-    # Acquire lock
     save_state(inode, offset, True, current_pid)
     print(f"[+] Lock acquired (PID: {current_pid}).")
     return inode, offset
 
 def release_lock(inode, offset):
-    """Release the lock and save final progress."""
     save_state(inode, offset, False, 0)
     print("[+] Lock released.")
 
 # === Helper Functions ===
-
 def clean_dict(d):
-    """Recursively remove empty values to avoid ES mapper_parsing_exception"""
     if not isinstance(d, dict):
         return d
-    
     cleaned = {}
     for k, v in d.items():
         if isinstance(v, dict):
@@ -125,7 +108,6 @@ def get_inode(filepath):
         return None
 
 def get_display_summary(doc):
-    """Optimize display to avoid 'Unknown' flooding"""
     process = doc.get('process', {})
     event = doc.get('event', {})
     
@@ -137,20 +119,9 @@ def get_display_summary(doc):
     if action:
         return f"ACTION: {action}"
         
-    category = event.get('category')
-    if category:
-        return f"CATEGORY: {category}"
-        
-    raw_data = doc.get('raw', {}).get('data', {})
-    if isinstance(raw_data, dict):
-        raw_type = raw_data.get('type')
-        if raw_type:
-            return f"TYPE: {raw_type}"
-            
     return "Event: (Details hidden)"
 
 # === Main Logic ===
-
 def main():
     if hasattr(os, 'geteuid') and os.geteuid() != 0:
         print("[-] Error: Must run as root.")
@@ -167,9 +138,7 @@ def main():
         print(f"[-] Error connecting to ES: {e}")
         sys.exit(1)
 
-    # 1. Acquire Lock & Load State
     saved_inode, saved_offset = acquire_lock()
-    
     parser = HostLogParser()
     
     # Index naming (Beijing Time)
@@ -178,49 +147,47 @@ def main():
     index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
     
     print(f"[*] Monitoring: {LOG_FILE}")
-    print("[*] Debug Mode: Visual Filters Active.")
+    print("[*] Visual Mode: Whitelist & Highlights Active.")
 
-    # Wait for log file
     while not os.path.exists(LOG_FILE):
         time.sleep(2)
 
     current_inode = get_inode(LOG_FILE)
     file_obj = open(LOG_FILE, 'r')
     
-    # Resume Logic
     if saved_inode == current_inode:
         print(f"[+] Resuming from offset {saved_offset}...")
         file_obj.seek(saved_offset)
     else:
-        print("[+] Starting from beginning (New file or rotation detected)...")
+        print("[+] Starting from beginning...")
         file_obj.seek(0)
 
     lines_processed = 0
     current_pid = os.getpid()
 
+    # Visual Filter Configuration
+    WATCH_LIST = ['cat', 'vim', 'nano', 'sudo', 'su', 'ssh', 'scp', 
+                  'wget', 'curl', 'nc', 'nmap', 'chmod', 'chown', 
+                  'useradd', 'passwd', 'python', 'python3', 'bash', 'sh']
+
     try:
         while True:
             line = file_obj.readline()
-            
             if not line:
-                # EOF: Check Rotation
                 try:
                     new_inode = get_inode(LOG_FILE)
                     if new_inode != current_inode:
-                        # Rotation detected
                         file_obj.close()
                         file_obj = open(LOG_FILE, 'r')
                         current_inode = new_inode
                         file_obj.seek(0)
                         save_state(current_inode, 0, True, current_pid)
                         continue
-                except Exception:
+                except:
                     pass
-                
                 time.sleep(0.1)
                 continue
 
-            # Process Line
             try:
                 line_str = line.decode('utf-8').strip()
             except:
@@ -229,20 +196,13 @@ def main():
             if not line_str:
                 continue
 
-            # Parsing
-            is_auditd_candidate = "type=" in line_str or "msg=audit" in line_str
-
-            if is_auditd_candidate:
+            if "type=" in line_str or "msg=audit" in line_str:
                 event = parser.parse(line_str, log_type="auditd")
                 if event:
                     doc = event.to_dict()
                     doc = clean_dict(doc)
                     
-                    # === Display & Filtering Logic ===
-                    WATCH_LIST = ['cat', 'vim', 'nano', 'sudo', 'su', 'ssh', 'scp', 
-                                  'wget', 'curl', 'nc', 'nmap', 'chmod', 'chown', 
-                                  'useradd', 'passwd', 'python', 'python3', 'bash', 'sh']
-                    
+                    # === Visual Filtering ===
                     process = doc.get('process', {})
                     proc_name = process.get('name', '')
                     cmd_line = process.get('command_line', '')
@@ -250,7 +210,6 @@ def main():
                     
                     should_print = False
                     
-                    # 1. Hard Silence for background process_started noise
                     if "process_started" in summary:
                         should_print = False
                     else:
@@ -278,19 +237,19 @@ def main():
                             else:
                                 print(f"{GREEN}[+] 🟢 WATCHED: {summary}{RESET}")
 
-                    try:
-                        es.index(index=index_name, document=doc)
-                    except Exception as e:
-                        print(f"[-] ES Write Error: {e}")
+                    if ENABLE_ES_WRITE:
+                        try:
+                            es.index(index=index_name, document=doc)
+                        except Exception as e:
+                            print(f"[-] ES Write Error: {e}")
             else:
-                # Raw Fallback
-                raw_doc = make_raw_doc(line_str)
-                try:
-                    es.index(index=index_name, document=raw_doc)
-                except Exception as e:
-                    print(f"[-] ES Write Error (Raw): {e}")
+                if ENABLE_ES_WRITE:
+                    raw_doc = make_raw_doc(line_str)
+                    try:
+                        es.index(index=index_name, document=raw_doc)
+                    except Exception as e:
+                        print(f"[-] ES Write Error (Raw): {e}")
 
-            # Checkpoint
             lines_processed += 1
             if lines_processed % 10 == 0:
                 save_state(current_inode, file_obj.tell(), True, current_pid)

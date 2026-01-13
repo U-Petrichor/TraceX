@@ -19,7 +19,6 @@ except ImportError:
 try:
     from elasticsearch import Elasticsearch
 except ImportError:
-    # Quietly exit or print only on fatal error as requested
     print("[-] Error: 'elasticsearch' module missing.")
     sys.exit(1)
 
@@ -141,9 +140,6 @@ def main():
     lines_processed = 0
     current_pid = os.getpid()
 
-    # Noise List
-    NOISE_PROCS = {'sleep', 'date', 'uptime', 'awk', 'sed', 'head', 'tail', 'cut', 'tr'}
-
     try:
         while True:
             line = file_obj.readline()
@@ -175,67 +171,12 @@ def main():
                 if event:
                     doc = event.to_dict()
                     doc = clean_dict(doc)
-                    
-                    # === Smart Filtering ===
-                    process = doc.get('process', {})
-                    event_info = doc.get('event', {})
-                    user = doc.get('user', {})
-                    
-                    proc_name = process.get('name', '')
-                    cmd_line = process.get('command_line', '')
-                    action = event_info.get('action', '')
-                    user_name = user.get('name', '')
-                    
-                    # 1. Drop process_started without cmd_line
-                    if action == 'process_started' and not cmd_line:
-                        continue
-
-                    # 2. Noise Filtering
-                    should_ingest = True
-                    if proc_name in NOISE_PROCS:
-                        should_ingest = False
-                        
-                        # Exception A: Sleep > 60s
-                        if proc_name == 'sleep':
-                            # check args or command_line
-                            # simple heuristic: check command_line for large numbers?
-                            # or strictly parse args if available. 
-                            # cmd_line ex: "sleep 100"
-                            try:
-                                parts = cmd_line.split()
-                                for p in parts:
-                                    if p.isdigit() and int(p) > 60:
-                                        should_ingest = True
-                                        break
-                            except:
-                                pass
-                        
-                        # Exception B: Web User
-                        if user_name in ['www-data', 'apache']:
-                            should_ingest = True
-                            
-                        # Exception C: Root user running non-preset command
-                        # (If we are here, it IS a preset/noise command. So this rule doesn't save it
-                        # unless the rule means "If Root runs it, we keep it"? 
-                        # The user text: "或者是 Root 用户执行的非系统预设命令" -> "OR Root executing non-preset".
-                        # This implies if Root executes "sleep" (preset), we DO NOT keep it.
-                        # So this exception does not apply inside the "if proc_name in NOISE_PROCS" block.
-                        # It applies to the general case (which is already True).
-                        # So we don't need to do anything here for Root.
+                    # NO FILTERING - Index Everything
+                    try:
+                        es.index(index=index_name, document=doc)
+                    except:
                         pass
-
-                    if should_ingest:
-                        try:
-                            es.index(index=index_name, document=doc)
-                        except:
-                            pass
             else:
-                # Raw logs are noise in Production? Usually yes, unless critical.
-                # User didn't specify, but "Smart Agent" usually implies "Only Parsed".
-                # But to be safe, I'll ingest raw if it looks important? 
-                # The user said "Smart Filtering... Drop... Noise Filter". 
-                # It didn't say "Drop Raw". 
-                # I will keep Raw for now to avoid data loss of unknown formats.
                 raw_doc = make_raw_doc(line_str)
                 try:
                     es.index(index=index_name, document=raw_doc)
