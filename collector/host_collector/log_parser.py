@@ -40,7 +40,7 @@ class HostLogParser:
         except (TypeError, ValueError):
             event_id = 0
             
-        # event.event.id = str(event_id)  <-- Removed to preserve UUID
+        # event.event.id = str(event_id)  <-- 移除此行以保留自动生成的 UUID
         event.host.os.family = "windows"
         
         # 处理时间戳

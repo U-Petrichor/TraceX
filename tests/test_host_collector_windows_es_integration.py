@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import warnings
+from datetime import datetime
 
 # Add project root to sys.path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,53 +37,80 @@ class TestWindowsESIntegration(unittest.TestCase):
             self.skipTest(f"Connection failed: {str(e)}")
             
         self.parser = HostLogParser()
-        self.index_name = "test-windows-logs-integration"
+        # Use the specific index name requested for presentation
+        self.index_name = "host-security-logs"
 
-    def test_parse_and_write_windows_event(self):
-        """Integration test: Parse Windows 4624 event and write to ES"""
+    def test_ingest_real_data(self):
+        """Ingest real simulation data for presentation (Persisted)"""
         
-        # 1. Create sample flat-structure Windows 4624 (Login) event
-        raw_event = {
-            "EventID": 4624,
-            "TimeCreated": "2023-10-27T10:00:00.000000Z",
-            "EventData": {
-                "TargetUserName": "IntegrationUser",
-                "IpAddress": "192.168.1.200",
-                "LogonType": "2"
+        print(f"\n[*] Starting data ingestion into index: {self.index_name}")
+        
+        # Generate timestamps for "now" so data appears current in Kibana
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        
+        mock_logs = [
+            # 1. Login Event (4624)
+            {
+                "EventID": 4624,
+                "TimeCreated": now_iso,
+                "EventData": {
+                    "TargetUserName": "Umut_Admin",
+                    "IpAddress": "10.0.0.5",
+                    "LogonType": "2", # Interactive
+                    "TargetDomainName": "CONTOSO"
+                }
+            },
+            # 2. Process Creation (4688) - Suspicious PowerShell
+            {
+                "EventID": 4688,
+                "TimeCreated": now_iso,
+                "EventData": {
+                    "NewProcessName": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                    "CommandLine": "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand JABzACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABJAE8ALgBNAGUAbQBvAHIAeQBTAHQAcgBlAGEAbQAoAFsAQwBvAG4AdgBlAHIAdABdADoAOgBGAHIAbwBtAEIAYQBzAGUANgA0AFMAdAByAGkAbgBnACgAIgBIADQAcwBJAEAA...",
+                    "ProcessId": "0x1A2B",
+                    "ParentProcessId": "0x04D2"
+                }
+            },
+            # 3. File Access (4663) - Sensitive File
+            {
+                "EventID": 4663,
+                "TimeCreated": now_iso,
+                "EventData": {
+                    "ObjectName": "C:\\Secret\\project.docx",
+                    "ProcessName": "C:\\Windows\\System32\\notepad.exe",
+                    "AccessMask": "0x2"
+                }
             }
-        }
+        ]
         
-        # 2. Parse using HostLogParser
-        unified_event = self.parser.parse(raw_event, log_type="windows")
-        self.assertIsInstance(unified_event, UnifiedEvent)
-        self.assertEqual(unified_event.user.name, "IntegrationUser")
-        
-        # 3. Write to ES
-        # Use 'document' parameter for newer ES clients, 'body' for older
-        doc = unified_event.to_dict()
-        
-        try:
-            # Try newer API first
-            resp = self.es.index(index=self.index_name, document=doc, refresh=True)
-        except TypeError:
-            # Fallback to older API
-            resp = self.es.index(index=self.index_name, body=doc, refresh=True)
+        for i, raw_log in enumerate(mock_logs):
+            # Parse
+            unified_event = self.parser.parse(raw_log, log_type="windows")
+            self.assertIsInstance(unified_event, UnifiedEvent)
             
-        # 4. Assert result
-        self.assertEqual(resp['result'], 'created')
-        
-        # Verify by reading back (optional but good for integration)
-        # Give it a moment for refresh
-        search_res = self.es.search(index=self.index_name, q=f"user.name:IntegrationUser")
-        self.assertGreater(search_res['hits']['total']['value'], 0)
-
-    def tearDown(self):
-        # Optional: Clean up index after test
-        if ES_AVAILABLE and hasattr(self, 'es') and self.es.ping():
+            # Write to ES
+            doc = unified_event.to_dict()
             try:
-                self.es.indices.delete(index=self.index_name, ignore=[400, 404])
-            except Exception:
-                pass
+                resp = self.es.index(index=self.index_name, document=doc, refresh=True)
+            except TypeError:
+                # Fallback for older clients
+                resp = self.es.index(index=self.index_name, body=doc, refresh=True)
+            
+            # Verify success
+            self.assertIn(resp['result'], ['created', 'updated'])
+            print(f"[+] Ingested Event {raw_log['EventID']} - Result: {resp['result']}")
 
+        # Print Kibana queries for the user
+        print("\n" + "="*60)
+        print("DATA INGESTION COMPLETE - READY FOR PRESENTATION")
+        print("="*60)
+        print("Use these Lucene queries in Kibana (Discover) to find the logs:")
+        print(f"1. Find Admin Login:       user.name:\"Umut_Admin\"")
+        print(f"2. Find Suspicious Shell:  process.name:\"powershell.exe\"")
+        print(f"3. Find Secret File:       file.name:\"project.docx\"")
+        print("="*60 + "\n")
+
+    # NOTE: tearDown method intentionally removed to persist data in Elasticsearch
+    
 if __name__ == "__main__":
     unittest.main()
