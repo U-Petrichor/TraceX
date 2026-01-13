@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import warnings
+import socket
 from datetime import datetime
 
 # Suppress ES security warnings
@@ -240,6 +241,53 @@ def main():
                                 print(f"{CYAN}[*] ⚡ ROOT: {summary}{RESET}")
                             else:
                                 print(f"{GREEN}[+] 🟢 WATCHED: {summary}{RESET}")
+
+                    # === Alignment Logic (Group 1) ===
+                    if 'host' not in doc: doc['host'] = {}
+                    doc['host']['name'] = socket.gethostname()
+                    
+                    # Severity
+                    # Use existing boolean flags from Visual Filtering
+                    current_severity = doc.get('event', {}).get('severity', 1)
+                    
+                    # Re-calculate flags if skipped (e.g. process_started skipped printing but we might want to index it? 
+                    # Wait, should_print logic might skip calculation?
+                    # No, variables is_watched_proc etc are calculated inside the else of "process_started" check.
+                    # If "process_started" in summary, should_print=False, and those vars are NOT calculated!
+                    # So I need to be careful.
+                    # If "process_started" in summary, we skip printing.
+                    # Do we skip indexing? The code says `if ENABLE_ES_WRITE: ... es.index`.
+                    # So we DO index it.
+                    # So we need to ensure variables are defined or re-calculate.
+                    
+                    # Let's look at the context again.
+                    # if "process_started" in summary: should_print = False
+                    # else: ... calculate is_sensitive_file ...
+                    
+                    # If "process_started", those vars are undefined! Python might throw UnboundLocalError.
+                    # Ah, I see "process_started" check is the first branch.
+                    # So I need to initialize them or check safely.
+                    
+                    # Better: Recalculate safely for ES purposes.
+                    
+                    proc_cmd_line = doc.get('process', {}).get('command_line', '')
+                    evt_action = doc.get('event', {}).get('action', '')
+                    user_id = str(doc.get('user', {}).get('id', ''))
+                    outcome = doc.get('event', {}).get('outcome', '')
+                    
+                    chk_sensitive = any(s in proc_cmd_line for s in ['/etc/passwd', '/etc/shadow', '.ssh', 'authorized_keys'])
+                    chk_root = (user_id == '0') and (evt_action != 'process_started')
+                    chk_failed = (outcome == 'failure')
+                    
+                    if chk_sensitive:
+                        current_severity = 10
+                    elif chk_root:
+                        current_severity = 8
+                    elif chk_failed:
+                        current_severity = 4
+                        
+                    if 'event' not in doc: doc['event'] = {}
+                    doc['event']['severity'] = int(current_severity)
 
                     if ENABLE_ES_WRITE:
                         try:

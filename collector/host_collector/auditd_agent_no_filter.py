@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import warnings
+import socket
 from datetime import datetime
 
 # Suppress ES security warnings
@@ -176,6 +177,28 @@ def main():
                     doc = event.to_dict()
                     doc = clean_dict(doc)
                     # NO FILTERING - Index Everything
+                    
+                    # === Alignment Logic (Group 1) ===
+                    if 'host' not in doc: doc['host'] = {}
+                    doc['host']['name'] = socket.gethostname()
+                    
+                    # Severity
+                    current_severity = doc.get('event', {}).get('severity', 1)
+                    process = doc.get('process', {})
+                    cmd_line = process.get('command_line', '')
+                    action = doc.get('event', {}).get('action', '')
+                    
+                    is_sensitive = any(s in cmd_line for s in ['/etc/passwd', '/etc/shadow', '.ssh', 'authorized_keys'])
+                    is_root_active = (str(doc.get('user', {}).get('id')) == '0') and (action != 'process_started')
+                    
+                    if is_sensitive:
+                        current_severity = 10
+                    elif is_root_active:
+                        current_severity = 8
+                    
+                    if 'event' not in doc: doc['event'] = {}
+                    doc['event']['severity'] = int(current_severity)
+
                     try:
                         es.index(index=index_name, document=doc)
                     except:

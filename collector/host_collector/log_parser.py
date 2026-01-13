@@ -287,14 +287,38 @@ class HostLogParser:
 
         event.event.dataset = "auditd"
 
-        # [Updated for Schema v4.0] 初始化 DetectionInfo (默认为空，等待 Analyzer 填充)
-        # 但可以在这里预留或根据简单规则填充
-        # 例如: 如果是 USER_LOGIN 失败，标记 severity
+        # [Updated for Schema v4.0] 初始化 DetectionInfo
+        # 统一威胁等级 (event.severity) 计算逻辑 (Int 1-10)
+        # 1: Info (Success)
+        # 4: Warning (Failure)
+        # 8: High (Root Operation)
+        # 10: Critical (Sensitive File)
+        
+        # 1. 基础分：根据结果判定
         if main_record.get("res") == "failed" or main_record.get("result") == "fail":
              event.event.outcome = "failure"
-             event.detection.severity = "low" # 简单登录失败
+             event.detection.severity = "low" # 兼容旧字段
+             event.event.severity = 4 
         else:
              event.event.outcome = "success"
+             event.event.severity = 1
+
+        # 2. 提权判定：Root 用户 (UID 0) -> High (8)
+        # 注意：覆盖基础分，但如果已经是 10 (后续逻辑) 则不降级
+        if event.user.id == "0" or event.user.name == "root":
+            if event.event.severity < 8:
+                event.event.severity = 8
+
+        # 3. 敏感目标判定：触碰敏感文件 -> Critical (10)
+        sensitive_patterns = ["/etc/passwd", "/etc/shadow", ".ssh", "/etc/sudoers"]
+        target_path = event.file.path or event.process.command_line or ""
+        
+        for pattern in sensitive_patterns:
+            if pattern in target_path:
+                event.event.severity = 10
+                event.detection.severity = "critical" # 同步更新旧字段
+                break
+
         
         # 填充主机信息
         
