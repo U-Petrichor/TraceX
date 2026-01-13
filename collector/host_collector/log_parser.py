@@ -5,16 +5,22 @@ from collector.common.schema import UnifiedEvent
 class HostLogParser:
     """主机日志解析器"""
     
+    def __init__(self):
+        self._audit_buffer = {}
+        self._last_audit_id = None
+
     def parse(self, raw_data, log_type: str = "auditd") -> UnifiedEvent:
         """
         统一解析入口
         :param raw_data: 原始日志数据 (Auditd为字符串行, Windows为字典)
         :param log_type: 日志类型 ("auditd" 或 "windows")
-        :return: UnifiedEvent 对象
+        :return: UnifiedEvent 对象 或 None (如果正在缓冲)
         """
         if log_type == "auditd":
-            parsed = self.parse_auditd_line(raw_data)
-            return self.to_unified_event(parsed)
+            aggregated_data = self.parse_auditd_line(raw_data)
+            if aggregated_data:
+                return self.to_unified_event(aggregated_data)
+            return None
         elif log_type == "windows":
             return self._parse_windows(raw_data)
         else:
