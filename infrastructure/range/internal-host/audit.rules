@@ -1,0 +1,29 @@
+# This file contains the auditctl rules that are loaded
+# whenever the audit daemon is started via the initscripts.
+# The rules are simply the parameters that would be passed
+# to auditctl.
+
+# First rule - delete all
+-D
+
+# Increase the buffers to survive stress events.
+# Make this bigger for busy systems
+-b 8192
+
+# Set failure mode to syslog
+-f 1
+
+# Monitor specific files
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/hosts -p wa -k system-locale
+
+# Monitor execution of commands
+-a always,exit -F arch=b64 -S execve -k exec
+-a always,exit -F arch=b32 -S execve -k exec
+
+# Monitor network connections (basic)
+-a always,exit -F arch=b64 -S connect -k network_out
+-a always,exit -F arch=b64 -S accept -k network_in

@@ -1,3 +1,4 @@
+
 version: '3.8'
 
 services:
@@ -44,11 +45,43 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    privileged: true
+    tty: true
+    stdin_open: true
+    # 核心：设置工作目录并指定启动命令
+    working_dir: /usr/local/zeek/logs
+    command: /usr/local/zeek/bin/zeek -i eth0 /usr/local/zeek/share/zeek/site/local.zeek
     volumes:
-      # 将 Zeek 日志映射到宿主机，方便手动运行的 Python 脚本读取
-      - /root/TraceX/data/zeek-logs:/opt/zeek/logs
-      - ./collector/network_collector/zeek_config:/opt/zeek/etc
+      # 根据你的目录树映射配置文件
+      - ./collector/network_collector/zeek_config/local.zeek:/usr/local/zeek/share/zeek/site/local.zeek
+      - ./collector/network_collector/zeek_config/node.cfg:/usr/local/zeek/etc/node.cfg
+      # 映射日志输出路径（对应你树状图中的 data/ 逻辑）
+      - ./data/zeek-logs:/usr/local/zeek/logs
     restart: always
+
+  internal-host:
+    build: ./infrastructure/range/internal-host
+    container_name: internal-host-node
+    networks:
+      attack-range:
+        ipv4_address: 172.20.0.40
+    volumes:
+      - /root/TraceX/data/internal-logs:/var/log
+    cap_add:
+      - AUDIT_CONTROL
+      - AUDIT_WRITE
+
+  dc-server:
+    build: ./infrastructure/range/dc-server
+    container_name: dc-server-node
+    networks:
+      attack-range:
+        ipv4_address: 172.20.0.50
+    volumes:
+      - /root/TraceX/data/dc-logs:/var/log
+    privileged: true
+    cap_add:
+      - NET_ADMIN
 
 networks:
   attack-range:
