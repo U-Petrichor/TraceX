@@ -225,6 +225,7 @@ def main():
                     doc = clean_dict(doc)
                     
                     # Display Optimization
+                    summary = get_display_summary(doc)
                     event_time = doc.get('@timestamp', 'Unknown Time')
                     print(f"[+] [{event_time}] Smart Event: {summary}")
                     
