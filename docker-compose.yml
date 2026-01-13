@@ -15,6 +15,23 @@ services:
     networks:
       - attack-range
 
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.9
+    container_name: filebeat-collector
+    user: root
+    restart: always
+    volumes:
+      # 组员1:挂载宿主机配置文件
+      - ./collector/host_collector/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # 组员1:挂载宿主机日志目录 (注意：容器内路径需与 filebeat.yml 中配置一致)
+      - /var/log:/hostfs/var/log:ro
+      # 组员1:挂载 Docker socket 以获取容器元数据 (可选)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - elasticsearch
+    networks:
+      - attack-range
+
   kibana:
     image: docker.elastic.co/kibana/kibana:7.17.9
     container_name: kibana-container
