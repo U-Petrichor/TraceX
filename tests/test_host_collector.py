@@ -183,10 +183,10 @@ class TestHostCollector(unittest.TestCase):
             # 查询最近的日志
             # 注意：process.name 在 ES 中可能是 "cat" 也可能是 "/usr/bin/cat"，且 Pipeline 可能会带引号
             # 使用更宽泛的查询条件：process.name 包含 cat 且 event.dataset 为 auditd
-            # 增加时间范围限制，避免查到历史数据或被大量网络日志淹没
+            # 另外，由于可能存在大量网络日志，增加时间范围过滤 (最近 1 分钟)
             from datetime import datetime, timedelta
             now = datetime.utcnow()
-            start_time = (now - timedelta(minutes=5)).isoformat() + "Z"
+            start_time = (now - timedelta(minutes=1)).isoformat() + "Z"
             
             query = {
                 "bool": {
