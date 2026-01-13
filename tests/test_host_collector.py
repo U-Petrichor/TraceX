@@ -13,7 +13,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from collector.common.es_client import ESClient
-from collector.common.schema import UnifiedEvent, EventInfo, SourceInfo
+from collector.common.schema import UnifiedEvent, EventInfo, SourceInfo, DestinationInfo
 from collector.host_collector.log_parser import HostLogParser, write_event
 
 class TestHostCollector(unittest.TestCase):
