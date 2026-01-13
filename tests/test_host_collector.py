@@ -233,5 +233,58 @@ class TestHostCollector(unittest.TestCase):
         except Exception as e:
             print(f"[Warn] 模拟操作失败: {e}")
 
+    def test_07_auditd_log_simulation(self):
+        """测试: 模拟 Auditd 写文件并验证采集 (自定义日志注入)"""
+        import tempfile
+        
+        print("\n[Info] 开始验证 Auditd 日志文件模拟采集...")
+        
+        # 1. 准备测试数据
+        # 用户提供的特定日志行
+        target_log = 'type=SYSCALL msg=audit(1616450000.123:100): arch=c000003e syscall=2 success=yes exit=3 a0=7ffe1234 a1=0 a2=0 a3=0 items=1 ppid=1000 pid=1001 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=1 comm="cat" exe="/bin/cat" key="test_rule"'
+        
+        # 为了触发解析器刷新，我们需要追加一个 EOE 信号或新的 ID
+        # 这里模拟 Auditd 正常的结束信号
+        flush_log = 'type=EOE msg=audit(1616450000.123:100):'
+        
+        # 2. 创建临时文件并写入
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, encoding='utf-8') as tmp:
+            tmp_path = tmp.name
+            print(f"[Info] 创建临时审计日志文件: {tmp_path}")
+            tmp.write(target_log + "\n")
+            tmp.write(flush_log + "\n")
+            
+        try:
+            # 3. 模拟采集过程 (读取文件 -> 解析)
+            parser = HostLogParser()
+            collected_event = None
+            
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    result = parser.parse(line, log_type="auditd")
+                    if result:
+                        collected_event = result
+                        # 找到事件后可以停止，因为我们要验证的就是这个
+                        break
+            
+            # 4. 验证结果
+            self.assertIsNotNone(collected_event, "未能采集到事件 (解析器未返回)")
+            
+            # 验证关键字段
+            print(f"[Info] 采集到的事件: {collected_event.to_dict()}")
+            
+            self.assertEqual(collected_event.process.pid, 1001, "PID 解析错误")
+            self.assertEqual(collected_event.process.name, "cat", "进程名解析错误")
+            self.assertEqual(collected_event.process.executable, "/bin/cat", "可执行文件路径解析错误")
+            
+            print("[Pass] 自定义 Auditd 日志采集模拟验证通过")
+            
+        finally:
+            # 清理临时文件
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                print(f"[Info] 已清理临时文件: {tmp_path}")
+
 if __name__ == '__main__':
     unittest.main()
