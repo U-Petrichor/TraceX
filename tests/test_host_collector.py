@@ -13,7 +13,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from collector.common.es_client import ESClient
-from collector.common.schema import UnifiedEvent, EventInfo, SourceInfo, DestinationInfo
+from collector.common.schema import UnifiedEvent, EventInfo, SourceInfo, DestinationInfo, MetaData, DetectionInfo
 from collector.host_collector.log_parser import HostLogParser, write_event
 
 class TestHostCollector(unittest.TestCase):
@@ -29,29 +29,8 @@ class TestHostCollector(unittest.TestCase):
             self.fail("无法连接到 Elasticsearch (localhost:9200)，请检查 Docker 是否开启")
         print("\n[Pass] Elasticsearch 连接成功")
 
-    def test_02_pipeline_installed(self):
-        """测试: Auditd 解析规则 (Pipeline) 是否已上传"""
-        pipeline_id = "auditd-pipeline"
-        pipeline_path = os.path.join(project_root, "collector", "host_collector", "pipeline", "auditd_pipeline.json")
-        
-        try:
-            self.es.ingest.get_pipeline(id=pipeline_id)
-            print(f"[Pass] Pipeline '{pipeline_id}' 存在")
-        except Exception:
-            print(f"[Warn] Pipeline '{pipeline_id}' 丢失，正在尝试自动上传...")
-            if not os.path.exists(pipeline_path):
-                 self.fail(f"Pipeline 文件未找到: {pipeline_path}")
-            
-            try:
-                with open(pipeline_path, 'r', encoding='utf-8') as f:
-                    pipeline_body = json.load(f)
-                self.es.ingest.put_pipeline(id=pipeline_id, body=pipeline_body)
-                print(f"[Pass] Pipeline '{pipeline_id}' 自动上传成功")
-            except Exception as e:
-                self.fail(f"Pipeline 自动上传失败: {e}")
-
     def test_03_data_schema_compliance(self):
-        """测试: 采集的数据是否符合小组统一规范 (Schema)"""
+        """测试: 采集的数据是否符合小组统一规范 (Schema v4.0)"""
         # 搜索最新的 1 条日志
         index_pattern = "unified-logs-*"
         
@@ -87,10 +66,10 @@ class TestHostCollector(unittest.TestCase):
         data = hits[0]['_source']
         print(f"\n[Info] 正在校验最新日志 ID: {hits[0]['_id']}")
 
-        # === 核心校验逻辑 (对应 UNIFIED_EVENT_SCHEMA) ===
+        # === 核心校验逻辑 (对应 UNIFIED_EVENT_SCHEMA v4.0) ===
         
         # 1. 检查必填字段是否存在
-        required_fields = ["@timestamp", "event", "host", "process", "raw"]
+        required_fields = ["@timestamp", "event", "host", "process", "raw", "metadata", "detection"]
         for field in required_fields:
             # 对于通过 ESClient 写入的测试数据，可能没有 process/raw 字段，需要做区分
             if data['event'].get('category') == 'test':
@@ -102,22 +81,30 @@ class TestHostCollector(unittest.TestCase):
             self.assertEqual(data['event'].get('dataset'), 'auditd', "event.dataset 应该是 'auditd'")
             self.assertIn('category', data['event'], "缺少 event.category")
 
-        # 3. 检查 process 结构 (这是 Pipeline 转换的重点)
-        # 如果是 SYSCALL 类型，必须解析出 pid
+        # 3. 检查 process 结构
         if 'process' in data and 'pid' in data['process']:
             self.assertIsInstance(data['process']['pid'], int, "process.pid 必须是数字类型")
+            # v4.0 新增: 检查 start_time
+            if 'start_time' in data['process']:
+                 print(f" [Debug] process.start_time: {data['process']['start_time']}")
         
         # 4. 检查是否保留了原始数据
         if 'raw' in data:
-            self.assertIn('data', data['raw'], "原始日志数据 (raw.data) 丢失")
+            self.assertIn('records', data['raw'], "原始日志数据 (raw.records) 丢失 (v4.0 使用 records 列表)")
+
+        # 5. 检查 v4.0 新增字段
+        if 'metadata' in data:
+             print(f" [Debug] metadata: {data['metadata']}")
+        if 'detection' in data:
+             print(f" [Debug] detection: {data['detection']}")
 
         print("[Pass] 数据格式校验通过！")
 
     def test_04_python_compliance(self):
-        """测试: Python 代码是否符合开发规范 (ESClient & UnifiedEvent)"""
+        """测试: Python 代码是否符合开发规范 (ESClient & UnifiedEvent v4.0)"""
         print("\n[Info] 开始验证 Python 代码规范性...")
         
-        # 1. 验证 UnifiedEvent 构造
+        # 1. 验证 UnifiedEvent 构造 (包含 v4.0 新字段)
         try:
             event = UnifiedEvent(
                 event=EventInfo(
@@ -127,11 +114,15 @@ class TestHostCollector(unittest.TestCase):
                 ),
                 source=SourceInfo(ip="127.0.0.1"),
                 destination=DestinationInfo(ip="127.0.0.1"),
-                message="Compliance Check"
+                message="Compliance Check",
+                metadata=MetaData(atlas_label="TEST_LABEL"),
+                detection=DetectionInfo(severity="low")
             )
             data = event.to_dict()
             self.assertEqual(data['event']['category'], 'process')
-            print("[Pass] UnifiedEvent 对象构造正常")
+            self.assertEqual(data['metadata']['atlas_label'], 'TEST_LABEL')
+            self.assertEqual(data['detection']['severity'], 'low')
+            print("[Pass] UnifiedEvent v4.0 对象构造正常")
         except Exception as e:
             self.fail(f"UnifiedEvent 构造失败: {e}")
 
@@ -144,15 +135,16 @@ class TestHostCollector(unittest.TestCase):
             self.fail(f"ESClient 写入失败: {e}")
 
     def test_05_log_parser_logic(self):
-        """测试: LogParser 核心解析逻辑 (模拟 Auditd 日志聚合)"""
+        """测试: LogParser 核心解析逻辑 (v4.0: 模拟 Auditd 日志聚合与新字段填充)"""
         print("\n[Info] 开始验证 LogParser 解析逻辑...")
         
         parser = HostLogParser()
-        # 模拟多行 Auditd 日志 (SYSCALL + EXECVE + EOE)
-        # 注意: 只有遇到 EOE 或新 ID 时才会触发聚合返回
+        # 模拟多行 Auditd 日志 (SYSCALL + EXECVE + PATH + EOE)
+        # 构造一个涉及 /tmp 下脚本执行的场景，以触发 metadata.atlas_label = TEMP_FILE
         logs = [
-            'type=SYSCALL msg=audit(1610000000.123:100): arch=c000003e syscall=59 success=yes exit=0 a0=... pid=1234 comm="cat" exe="/bin/cat" uid=0 auid=1000',
-            'type=EXECVE msg=audit(1610000000.123:100): argc=2 a0="cat" a1="/etc/passwd"',
+            'type=SYSCALL msg=audit(1610000000.123:100): arch=c000003e syscall=59 success=yes exit=0 a0=... pid=1234 comm="sh" exe="/bin/dash" uid=0 auid=1000',
+            'type=EXECVE msg=audit(1610000000.123:100): argc=2 a0="sh" a1="/tmp/evil.sh"',
+            'type=PATH msg=audit(1610000000.123:100): item=0 name="/tmp/evil.sh" inode=123 dev=fd:00 mode=0100755 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0',
             'type=EOE msg=audit(1610000000.123:100):'
         ]
         
@@ -163,12 +155,21 @@ class TestHostCollector(unittest.TestCase):
                 event = result
                 
         self.assertIsNotNone(event, "解析失败: 未能聚合事件")
-        self.assertEqual(event.process.pid, 1234, "PID 提取错误")
-        self.assertEqual(event.process.name, "cat", "进程名提取错误")
-        self.assertEqual(event.event.category, "process", "事件类别错误")
-        self.assertEqual(event.process.command_line, "cat /etc/passwd", "命令行重组错误")
         
-        print("[Pass] LogParser 聚合逻辑验证通过")
+        # 验证基础字段
+        self.assertEqual(event.process.pid, 1234, "PID 提取错误")
+        self.assertEqual(event.process.name, "sh", "进程名提取错误")
+        self.assertEqual(event.event.category, "file", "事件类别错误 (涉及文件操作应被标记为 file)") # 逻辑中如果检测到 PATH 会改为 file
+        self.assertIn("/tmp/evil.sh", event.process.command_line, "命令行重组错误")
+        
+        # 验证 v4.0 新增字段逻辑
+        print(f" [Debug] Process Start Time: {event.process.start_time}")
+        self.assertTrue(event.process.start_time.startswith("2021-01-07"), "Process Start Time 未正确填充 (应基于 timestamp)")
+        
+        print(f" [Debug] MetaData Atlas Label: {event.metadata.atlas_label}")
+        self.assertEqual(event.metadata.atlas_label, "TEMP_FILE", "Atlas Label 规则未生效 (预期: TEMP_FILE)")
+        
+        print("[Pass] LogParser v4.0 聚合与增强逻辑验证通过")
 
     def test_06_host_behavior_simulation(self):
         """测试: 模拟主机行为并验证采集 (自动化触发)"""
@@ -240,12 +241,11 @@ class TestHostCollector(unittest.TestCase):
         print("\n[Info] 开始验证 Auditd 日志文件模拟采集...")
         
         # 1. 准备测试数据
-        # 用户提供的特定日志行
-        target_log = 'type=SYSCALL msg=audit(1616450000.123:100): arch=c000003e syscall=2 success=yes exit=3 a0=7ffe1234 a1=0 a2=0 a3=0 items=1 ppid=1000 pid=1001 auid=1000 uid=1000 gid=1000 euid=1000 suid=1000 fsuid=1000 egid=1000 sgid=1000 fsgid=1000 tty=pts0 ses=1 comm="cat" exe="/bin/cat" key="test_rule"'
+        # 用户提供的特定日志行 (v4.0: 包含失败登录场景以测试 detection)
+        target_log = 'type=USER_LOGIN msg=audit(1616450000.123:101): pid=2000 uid=0 auid=4294967295 ses=4294967295 msg=\'op=login id=1000 exe="/usr/sbin/sshd" hostname=? addr=192.168.1.100 terminal=ssh res=failed\''
         
         # 为了触发解析器刷新，我们需要追加一个 EOE 信号或新的 ID
-        # 这里模拟 Auditd 正常的结束信号
-        flush_log = 'type=EOE msg=audit(1616450000.123:100):'
+        flush_log = 'type=EOE msg=audit(1616450000.123:101):'
         
         # 2. 创建临时文件并写入
         with tempfile.NamedTemporaryFile(mode='w+', delete=False, encoding='utf-8') as tmp:
@@ -265,7 +265,6 @@ class TestHostCollector(unittest.TestCase):
                     result = parser.parse(line, log_type="auditd")
                     if result:
                         collected_event = result
-                        # 找到事件后可以停止，因为我们要验证的就是这个
                         break
             
             # 4. 验证结果
@@ -274,11 +273,14 @@ class TestHostCollector(unittest.TestCase):
             # 验证关键字段
             print(f"[Info] 采集到的事件: {collected_event.to_dict()}")
             
-            self.assertEqual(collected_event.process.pid, 1001, "PID 解析错误")
-            self.assertEqual(collected_event.process.name, "cat", "进程名解析错误")
-            self.assertEqual(collected_event.process.executable, "/bin/cat", "可执行文件路径解析错误")
+            self.assertEqual(collected_event.event.category, "authentication", "Category 错误")
+            self.assertEqual(collected_event.event.outcome, "failure", "Outcome 错误 (应为 failure)")
             
-            print("[Pass] 自定义 Auditd 日志采集模拟验证通过")
+            # 验证 v4.0 detection 字段
+            print(f" [Debug] Detection Severity: {collected_event.detection.severity}")
+            self.assertEqual(collected_event.detection.severity, "low", "Detection Severity 未正确设置 (应为 low)")
+            
+            print("[Pass] 自定义 Auditd 日志 (失败登录) 采集模拟验证通过")
             
         finally:
             # 清理临时文件
