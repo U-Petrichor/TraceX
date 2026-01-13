@@ -5,6 +5,101 @@ from collector.common.schema import UnifiedEvent
 class HostLogParser:
     """主机日志解析器"""
     
+    def parse(self, raw_data, log_type: str = "auditd") -> UnifiedEvent:
+        """
+        统一解析入口
+        :param raw_data: 原始日志数据 (Auditd为字符串行, Windows为字典)
+        :param log_type: 日志类型 ("auditd" 或 "windows")
+        :return: UnifiedEvent 对象
+        """
+        if log_type == "auditd":
+            parsed = self.parse_auditd_line(raw_data)
+            return self.to_unified_event(parsed)
+        elif log_type == "windows":
+            return self._parse_windows(raw_data)
+        else:
+            raise ValueError(f"Unsupported log_type: {log_type}")
+
+    def _parse_windows(self, win_log: dict) -> UnifiedEvent:
+        """
+        解析 Windows Event Log (JSON格式)
+        支持事件: 4624(登录), 4688(进程创建), 4663(对象访问)
+        """
+        event = UnifiedEvent()
+        event.raw = win_log
+        event.event.dataset = "windows"
+        
+        # 1. 基础字段提取
+        # 尝试获取 EventID (支持 top-level 或 System.EventID)
+        event_id = win_log.get("EventID")
+        if event_id is None and "System" in win_log:
+            event_id = win_log["System"].get("EventID")
+            
+        try:
+            event_id = int(event_id)
+        except (TypeError, ValueError):
+            event_id = 0
+            
+        # event.event.id = str(event_id)  <-- Removed to preserve UUID
+        event.host.os.family = "windows"
+        
+        # 处理时间戳
+        time_created = win_log.get("TimeCreated")
+        if time_created is None and "System" in win_log:
+            time_created = win_log["System"].get("TimeCreated")
+            if isinstance(time_created, dict):
+                time_created = time_created.get("SystemTime")
+        
+        if time_created:
+            event.timestamp = str(time_created)
+
+        # 获取 EventData
+        data = win_log.get("EventData", win_log)
+        
+        # 2. 根据 EventID 映射逻辑
+        if event_id == 4624:
+            # 登录成功
+            event.event.category = "authentication"
+            event.event.action = "login"
+            event.event.outcome = "success"
+            event.user.name = data.get("TargetUserName", "")
+            event.source.ip = data.get("IpAddress", "")
+            
+        elif event_id == 4688:
+            # 进程创建
+            event.event.category = "process"
+            event.event.action = "process_created"
+            event.event.type = "start"
+            
+            event.process.executable = data.get("NewProcessName", "")
+            # 从完整路径提取文件名
+            if event.process.executable:
+                event.process.name = event.process.executable.split("\\")[-1]
+            else:
+                event.process.name = "unknown"
+                
+            event.process.command_line = data.get("CommandLine", "")
+            
+            try:
+                event.process.pid = int(data.get("ProcessId", 0), 16) if isinstance(data.get("ProcessId"), str) and data.get("ProcessId").startswith("0x") else int(data.get("ProcessId", 0))
+                event.process.parent.pid = int(data.get("ParentProcessId", 0), 16) if isinstance(data.get("ParentProcessId"), str) and data.get("ParentProcessId").startswith("0x") else int(data.get("ParentProcessId", 0))
+            except ValueError:
+                pass
+
+        elif event_id == 4663:
+            # 对象访问 (文件等)
+            event.event.category = "file"
+            event.event.action = "access"
+            event.file.path = data.get("ObjectName", "")
+            if event.file.path:
+                event.file.name = event.file.path.split("\\")[-1]
+                
+        else:
+            event.event.category = "host"
+            event.event.action = "unknown_windows_event"
+
+        return event
+
     def parse_auditd_line(self, line: str) -> dict:
         """
         将 Auditd 的原始日志行解析为字典
