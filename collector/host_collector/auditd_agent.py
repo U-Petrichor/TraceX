@@ -30,10 +30,22 @@ STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
 
 def clean_dict(d):
-    """Recursively remove empty strings to avoid ES mapper_parsing_exception"""
+    """Recursively remove empty values (None, '', [], {}) to avoid ES mapper_parsing_exception"""
     if not isinstance(d, dict):
         return d
-    return {k: clean_dict(v) for k, v in d.items() if v != ""}
+    
+    cleaned = {}
+    for k, v in d.items():
+        if isinstance(v, dict):
+            nested = clean_dict(v)
+            if nested:
+                cleaned[k] = nested
+        elif isinstance(v, list):
+            if v:
+                cleaned[k] = v
+        elif v not in [None, ""]:
+            cleaned[k] = v
+    return cleaned
 
 def make_raw_doc(line_str):
     """Wraps unknown logs into a JSON document"""
@@ -129,6 +141,14 @@ def main():
     print(f"[*] State file: {STATE_FILE}")
     print(f"[*] Target Index: {index_name} (Beijing Time)")
 
+    # === Rule Check ===
+    # Remind user to configure audit rules if not present
+    if os.path.exists("/etc/audit/audit.rules") or os.path.exists("/etc/audit/rules.d/audit.rules"):
+         print("[*] Audit rules found. Ensuring monitoring is active...")
+    else:
+         print("[-] Warning: No audit rules found! 'cat /etc/passwd' might not generate logs.")
+         print("    Suggest running: auditctl -w /etc/passwd -p r -k passwd_read")
+
     # Wait for log file to exist
     while not os.path.exists(LOG_FILE):
         print(f"[-] Waiting for {LOG_FILE} to appear...")
@@ -191,9 +211,12 @@ def main():
                 continue
 
             # === Step 1: Detection ===
-            is_auditd = "type=" in line_str and "msg=audit" in line_str
+            # Auditd logs usually contain "type=" and "msg=audit".
+            # To avoid treating partial/buffered auditd lines as "Unknown" (Raw),
+            # we try to parse them as auditd first if they look even remotely like one.
+            is_auditd_candidate = "type=" in line_str or "msg=audit" in line_str
 
-            if is_auditd:
+            if is_auditd_candidate:
                 # === Step 2: Smart Path (Auditd) ===
                 event = parser.parse(line_str, log_type="auditd")
                 
@@ -209,8 +232,14 @@ def main():
                         es.index(index=index_name, document=doc)
                     except Exception as e:
                         print(f"[-] ES Write Error (Auditd): {e}")
+                else:
+                    # Event is None means:
+                    # 1. Buffering (waiting for more lines) -> Normal behavior
+                    # 2. Parsing failed -> We skip it (better than writing garbage raw log)
+                    pass
             else:
                 # === Step 3: Fallback Path (Unknown) ===
+                # Only write to Raw if it definitely DOES NOT look like an auditd log
                 # print(f"[+] Raw Log: {line_str[:50]}...")
                 # Reduce noise for raw logs too? Maybe just print count or sample
                 # For now keeping it visible but maybe less verbose
