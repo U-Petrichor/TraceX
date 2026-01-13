@@ -224,47 +224,50 @@ def main():
                     doc = event.to_dict()
                     doc = clean_dict(doc)
                     
-                    # === Display & Filtering Logic ===
-                    # 1. 定义噪音进程黑名单
-                    NOISE_PROCS = ['sleep', 'date', 'uptime', 'sed', 'awk', 'head', 'tail', 'cut', 'tr']
+                    # === Display & Filtering Logic (Whitelist Mode) ===
+                    # 1. 定义关注列表 (白名单)
+                    WATCH_LIST = ['cat', 'vim', 'nano', 'sudo', 'su', 'ssh', 'scp', 
+                                  'wget', 'curl', 'nc', 'nmap', 'chmod', 'chown', 
+                                  'useradd', 'passwd', 'python', 'python3', 'bash', 'sh']
                     
                     # 提取关键字段
                     process = doc.get('process', {})
                     proc_name = process.get('name', '')
                     cmd_line = process.get('command_line', '')
                     summary = get_display_summary(doc)
-                    event_time = doc.get('@timestamp', 'Unknown Time')
-
-                    # 2. 第一层过滤：丢弃噪音
-                    # 如果进程在黑名单中，或者命令行包含 /proc/ 读取操作，则不打印
-                    if proc_name in NOISE_PROCS or '/proc/' in cmd_line:
-                        # Skip printing, but still write to ES (or continue to write)
-                        pass
                     
-                    # 3. 第二层判断：高亮高危
-                    else:
-                        # ANSI Colors
+                    # 默认不打印
+                    should_print = False
+                    
+                    # 判定逻辑
+                    is_watched_proc = proc_name in WATCH_LIST
+                    is_sensitive_file = any(s in cmd_line for s in ['/etc/passwd', '/etc/shadow', '.ssh', 'authorized_keys'])
+                    is_root_activity = (str(doc.get('user', {}).get('id')) == '0') and (doc.get('event', {}).get('action') != 'process_started')
+                    is_failed = doc.get('event', {}).get('outcome') == 'failure'
+                    
+                    if is_watched_proc or is_sensitive_file or is_root_activity or is_failed:
+                        should_print = True
+                        
+                    # 打印样式 (ANSI Colors)
+                    if should_print:
                         RED = '\033[91m'
                         YELLOW = '\033[93m'
                         CYAN = '\033[96m'
+                        GREEN = '\033[92m'
                         RESET = '\033[0m'
-
-                        # Rule A: Sensitive Files (Red)
-                        if any(s in cmd_line for s in ['/etc/passwd', '.ssh', 'shadow']):
+                        
+                        # 优先级 1: 敏感文件
+                        if is_sensitive_file:
                             print(f"{RED}[!] 🛑 SENSITIVE: {summary}{RESET}")
-                        
-                        # Rule B: Failed Operations (Yellow)
-                        elif doc.get('event', {}).get('outcome') == 'failure':
+                        # 优先级 2: 失败操作
+                        elif is_failed:
                             print(f"{YELLOW}[?] ⚠️ FAILED: {summary}{RESET}")
-                        
-                        # Rule C: Root Operations (Cyan)
-                        # Check uid in user object or raw fields
-                        elif str(doc.get('user', {}).get('id')) == '0':
+                        # 优先级 3: Root 异常行为
+                        elif is_root_activity:
                             print(f"{CYAN}[*] ⚡ ROOT: {summary}{RESET}")
-                        
-                        # 4. 第三层兜底：普通打印
+                        # 优先级 4: 普通关注
                         else:
-                            print(f"[+] CMD: {summary}")
+                            print(f"{GREEN}[+] 🟢 WATCHED: {summary}{RESET}")
                     
                     try:
                         es.index(index=index_name, document=doc)
