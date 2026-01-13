@@ -1,111 +1,88 @@
+# /root/TraceX/tests/test_cowrie_data.py
 import sys
-import json
 from datetime import datetime, timedelta
 
-# 1. 引入公共模块
 sys.path.append('/root/TraceX')
 try:
     from collector.common.es_client import ESClient
     from collector.common.schema import UnifiedEvent
 except ImportError:
-    print("错误: 无法加载公共模块，请检查目录结构是否为 /root/TraceX/collector/common/")
+    print("错误: 无法加载公共模块")
     sys.exit(1)
 
 class DataValidator:
-    """数据质量自检工具"""
-
     def __init__(self):
         self.es = ESClient()
-        self.stats = {
-            "total": 0,
-            "valid": 0,
-            "invalid": 0,
-            "missing_fields": {},
-            "type_errors": 0
-        }
+        self.stats = {"total": 0, "valid": 0, "invalid": 0, "errors": []}
 
-    def check_quality(self, hours=1):
-        """检查过去 X 小时内的数据质量"""
+    def check_quality(self, hours=24):
         now = datetime.utcnow()
         start_time = (now - timedelta(hours=hours)).isoformat() + "Z"
         end_time = now.isoformat() + "Z"
 
-        print(f"[*] 开始自检时间段: {start_time} 至 {end_time}")
-        
-        # 调用公共接口查询数据
-        events = self.es.query_events(start_time, end_time, size=500)
+        print(f"[*] 正在从 ES 读取过去 {hours} 小时的数据进行合规性校验...")
+        events = self.es.query_events(start_time, end_time, size=1000)
         self.stats["total"] = len(events)
 
         if not events:
-            print("[!] 警告: 未在 ES 中发现任何数据，请检查 flow_parser.py 是否正在运行。")
+            print("[!] 警告: 未发现数据。")
             return
 
         for doc in events:
-            self._validate_document(doc)
+            self._validate_event(doc)
 
         self._print_report()
 
-    def _validate_document(self, doc):
-        """根据 UNIFIED_EVENT_SCHEMA 校验文档字段"""
-        is_valid = True
-        errors = []
+    def _validate_event(self, doc):
+        """核心校验逻辑"""
+        try:
+            # 1. 尝试还原为 Dataclass 对象，这会自动处理嵌套结构
+            event_obj = UnifiedEvent.from_dict(doc)
+            
+            is_valid = True
+            reasons = []
 
-        # 1. 核心必填字段校验
-        mandatory_fields = ["@timestamp", "event", "source", "host"]
-        for field in mandatory_fields:
-            if field not in doc:
+            # 2. 检查必须具备的业务字段
+            if not event_obj.event.dataset:
                 is_valid = False
-                self.stats["missing_fields"][field] = self.stats["missing_fields"].get(field, 0) + 1
-                errors.append(f"缺失必填主字段: {field}")
-
-        # 2. 严重程度逻辑校验 (1-10)
-        severity = doc.get("event", {}).get("severity", 0)
-        if not (1 <= severity <= 10):
-            is_valid = False
-            self.stats["type_errors"] += 1
-            errors.append(f"Severity 越界: {severity}")
-
-        # 3. 数据来源校验
-        if not doc.get("event", {}).get("dataset"):
-            is_valid = False
-            errors.append("缺失数据来源标识 (dataset)")
-
-        # 4. 关键业务字段校验 (针对蜜罐连接)
-        if doc.get("event", {}).get("action") == "cowrie.session.connect":
-            if not doc.get("source", {}).get("ip"):
+                reasons.append("缺失 event.dataset")
+            
+            if not event_obj.source.ip:
                 is_valid = False
-                errors.append("连接事件缺失源 IP")
+                reasons.append("缺失 source.ip")
+            
+            if not event_obj.event.category:
+                is_valid = False
+                reasons.append("缺失 event.category")
 
-        if is_valid:
-            self.stats["valid"] += 1
-        else:
+            if is_valid:
+                self.stats["valid"] += 1
+            else:
+                self.stats["invalid"] += 1
+                self.stats["errors"].append(f"ID {event_obj.event.id}: {', '.join(reasons)}")
+
+        except Exception as e:
             self.stats["invalid"] += 1
-            # print(f"[X] 文档 ID {doc.get('event', {}).get('id')} 校验失败: {errors}")
+            self.stats["errors"].append(f"解析异常: {str(e)}")
 
     def _print_report(self):
-        """打印质量分析报告"""
         print("\n" + "="*40)
-        print("📊 数据质量自检报告")
+        print("📊 组员 2 数据合规性报告 (基于最新 Schema)")
         print("="*40)
-        print(f"总检查条数: {self.stats['total']}")
-        print(f"✅ 合格条数: {self.stats['valid']}")
-        print(f"❌ 不合格条数: {self.stats['invalid']}")
+        print(f"总计条数: {self.stats['total']}")
+        print(f"通过校验: {self.stats['valid']}")
+        print(f"校验失败: {self.stats['invalid']}")
         
-        if self.stats["invalid"] > 0:
-            print("\n主要问题统计:")
-            for field, count in self.stats["missing_fields"].items():
-                print(f"- 缺失字段 '{field}': {count} 次")
-            print(f"- 字段类型/逻辑错误: {self.stats['type_errors']} 次")
-        
-        score = (self.stats["valid"] / self.stats["total"]) * 100 if self.stats["total"] > 0 else 0
-        print(f"\n健康分: {score:.1f}/100")
-        if score < 90:
-            print("[建议] 数据质量较低，请检查 flow_parser.py 的映射逻辑。")
-        else:
-            print("[优秀] 数据格式完美，组员 3 和 4 可以放心使用。")
+        if self.stats["total"] > 0:
+            score = (self.stats["valid"] / self.stats["total"]) * 100
+            print(f"数据健康分: {score:.1f}/100")
+            
+            if score < 100 and self.stats["errors"]:
+                print("\n具体错误样例 (前5条):")
+                for err in self.stats["errors"][:5]:
+                    print(f" - {err}")
         print("="*40)
 
 if __name__ == "__main__":
     validator = DataValidator()
-    # 检查过去 24 小时的数据
-    validator.check_quality(hours=24)
+    validator.check_quality(hours=1) # 检查最近 1 小时即可

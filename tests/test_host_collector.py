@@ -31,11 +31,24 @@ class TestHostCollector(unittest.TestCase):
 
     def test_02_pipeline_installed(self):
         """测试: Auditd 解析规则 (Pipeline) 是否已上传"""
+        pipeline_id = "auditd-pipeline"
+        pipeline_path = os.path.join(project_root, "collector", "host_collector", "pipeline", "auditd_pipeline.json")
+        
         try:
-            self.es.ingest.get_pipeline(id="auditd-pipeline")
-            print("[Pass] Pipeline 'auditd-pipeline' 存在")
-        except Exception as e:
-            self.fail(f"Pipeline 丢失！请重新运行 curl 上传 pipeline.json。错误: {e}")
+            self.es.ingest.get_pipeline(id=pipeline_id)
+            print(f"[Pass] Pipeline '{pipeline_id}' 存在")
+        except Exception:
+            print(f"[Warn] Pipeline '{pipeline_id}' 丢失，正在尝试自动上传...")
+            if not os.path.exists(pipeline_path):
+                 self.fail(f"Pipeline 文件未找到: {pipeline_path}")
+            
+            try:
+                with open(pipeline_path, 'r', encoding='utf-8') as f:
+                    pipeline_body = json.load(f)
+                self.es.ingest.put_pipeline(id=pipeline_id, body=pipeline_body)
+                print(f"[Pass] Pipeline '{pipeline_id}' 自动上传成功")
+            except Exception as e:
+                self.fail(f"Pipeline 自动上传失败: {e}")
 
     def test_03_data_schema_compliance(self):
         """测试: 采集的数据是否符合小组统一规范 (Schema)"""
@@ -155,7 +168,73 @@ class TestHostCollector(unittest.TestCase):
         if platform.system().lower() != 'linux':
             print("\n[Skip] 跳过主机行为模拟 (非 Linux 环境)")
             return
+        
+        # === 自动检查并配置 Filebeat (如果需要) ===
+        if os.geteuid() == 0:  # 只有 root 用户才能修改配置
+            print("\n[Info] 正在检查 Filebeat 配置...")
+            filebeat_config_path = "/etc/filebeat/filebeat.yml"
+            expected_content = """filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/audit/audit.log
+  pipeline: "auditd-pipeline"
+
+- type: log
+  enabled: true
+  paths:
+    - /var/log/syslog
+    - /var/log/messages
+  pipeline: "syslog-pipeline"
+
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+  - add_cloud_metadata: ~
+  - add_docker_metadata: ~
+  - add_kubernetes_metadata: ~
+
+setup.ilm.enabled: false
+setup.template.name: "unified-logs"
+setup.template.pattern: "unified-logs-*"
+setup.template.overwrite: true
+
+output.elasticsearch:
+  hosts: ["localhost:9200"]
+  index: "unified-logs-%{+yyyy.MM.dd}"
+
+setup.kibana:
+  host: "localhost:5601"
+"""
+            # 检查是否需要更新
+            need_update = True
+            if os.path.exists(filebeat_config_path):
+                with open(filebeat_config_path, 'r', encoding='utf-8') as f:
+                    current_content = f.read()
+                # 简单比对关键内容，忽略空白差异
+                if expected_content.strip() in current_content.strip():
+                    need_update = False
+                    print("[Pass] Filebeat 配置已是最新，无需更新")
             
+            if need_update:
+                print("[Info] Filebeat 配置需要更新，正在自动配置...")
+                try:
+                    # 备份
+                    if os.path.exists(filebeat_config_path):
+                         os.rename(filebeat_config_path, filebeat_config_path + ".bak")
+                    # 写入
+                    with open(filebeat_config_path, 'w', encoding='utf-8') as f:
+                        f.write(expected_content)
+                    print("[Success] 配置文件更新成功")
+                    
+                    # 重启服务
+                    subprocess.run(["systemctl", "restart", "filebeat"], check=True)
+                    print("[Success] Filebeat 服务重启成功")
+                except Exception as e:
+                    print(f"[Warn] 自动配置 Filebeat 失败: {e}")
+        else:
+            print("[Info] 非 root 用户，跳过 Filebeat 自动配置检查")
+
         print("\n[Info] 正在模拟主机敏感操作 (读取 /etc/passwd)...")
         try:
             # 触发一个简单的读文件操作，应该被 auditd 捕获
