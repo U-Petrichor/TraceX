@@ -41,6 +41,15 @@ class TestWindowsESIntegration(unittest.TestCase):
         # Dynamic index name: unified-logs-{YYYY.MM.DD}
         self.index_name = f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
 
+    def remove_empty_fields(self, data):
+        """Recursively remove keys with empty string values to prevent ES mapping errors."""
+        if isinstance(data, dict):
+            return {k: self.remove_empty_fields(v) for k, v in data.items() if v != ""}
+        elif isinstance(data, list):
+            return [self.remove_empty_fields(item) for item in data]
+        else:
+            return data
+
     def test_ingest_real_data(self):
         """Ingest real simulation data for presentation (Persisted)"""
         
@@ -91,6 +100,10 @@ class TestWindowsESIntegration(unittest.TestCase):
             
             # Write to ES
             doc = unified_event.to_dict()
+            
+            # Clean empty fields to prevent ES mapping errors (e.g., destination.ip="")
+            doc = self.remove_empty_fields(doc)
+            
             try:
                 resp = self.es.index(index=self.index_name, document=doc, refresh=True)
             except TypeError:
