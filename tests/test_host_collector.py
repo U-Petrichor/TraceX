@@ -126,7 +126,6 @@ class TestHostCollector(unittest.TestCase):
                     severity=1
                 ),
                 source=SourceInfo(ip="127.0.0.1"),
-                destination=DestinationInfo(ip="127.0.0.1"),
                 message="Compliance Check"
             )
             data = event.to_dict()
