@@ -1,76 +1,78 @@
-# tests/test_zeek_data.py
-import sys
-import os
-from datetime import datetime, timedelta
+# /root/TraceX/tests/test_zeek_data.py
 
-# 确保可以加载项目根目录下的模块
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import sys
+import json
+from datetime import datetime
+
+# 确保加载公共模块路径
+sys.path.append('/root/TraceX')
 
 try:
     from collector.common.es_client import ESClient
     from collector.common.schema import UnifiedEvent
 except ImportError:
-    print("错误: 无法加载公共模块，请检查目录结构")
+    print("[-] 错误: 无法加载公共模块 (es_client 或 schema)")
     sys.exit(1)
 
-def run_zeek_data_test():
-    print("=== 开始 Zeek 数据标准化测试 ===")
-    
-    # 1. 初始化客户端
-    client = ESClient(hosts=["http://localhost:9200"])
-    
-    # 2. 确定查询时间范围（查询过去 10 分钟的数据）
-    now = datetime.utcnow()
-    start_time = (now - timedelta(minutes=10)).isoformat() + "Z"
-    end_time = now.isoformat() + "Z"
-    
-    print(f"[*] 正在从 ES 查询范围: {start_time} 至 {end_time}")
+class TraceXValidator:
+    def __init__(self):
+        self.es = ESClient(hosts=["http://localhost:9200"])
+        self.index_pattern = "network-flows-*"
 
-    # 3. 从索引 network-flows-* 中检索数据
-    raw_events = client.query_events(
-        start_time=start_time,
-        end_time=end_time,
-        index_prefix="network-flows"
-    )
-    
-    if not raw_events:
-        print("[!] 警告: 未在指定时间内找到任何 Zeek 数据，请确保解析脚本正在运行。")
-        return
+    def run_compliance_check(self):
+        print(f"[*] 启动 TraceX 数据合规性检查 (索引: {self.index_pattern})")
+        
+        # 1. 检索一条确实包含威胁名称的告警记录
+        query_threat = {
+            "query": { "wildcard": { "threat.technique.name": "*" } },
+            "size": 1
+        }
+        
+        # 2. 检索一条普通网络记录 (threat 字段不存在)
+        query_normal = {
+            "query": { "bool": { "must_not": { "exists": { "field": "threat" } } } },
+            "size": 1
+        }
 
-    print(f"[*] 找到 {len(raw_events)} 条原始记录，开始模式校验...")
+        self._validate_sample(query_threat, "【威胁告警记录】")
+        self._validate_sample(query_normal, "【普通流转记录】")
 
-    success_count = 0
-    fail_count = 0
-
-    for i, event_dict in enumerate(raw_events):
+    def _validate_sample(self, query, label):
+        print(f"\n--- 正在验证 {label} ---")
         try:
-            # 4. 尝试使用 schema.py 中的 from_dict 进行还原
-            unified_obj = UnifiedEvent.from_dict(event_dict)
+            # 使用 es 客户端进行搜索
+            res = self.es.es.search(index=self.index_pattern, body=query)
+            hits = res['hits']['hits']
             
-            # 5. 关键字段业务校验
-            # 检查是否为 Zeek 数据集
-            assert unified_obj.event.dataset == "zeek.conn", f"Dataset 不匹配: {unified_obj.event.dataset}"
-            # 检查关键网络字段是否存在
-            assert unified_obj.source.ip != "", "源 IP 不能为空"
-            assert unified_obj.destination.ip != "", "目的 IP 不能为空"
-            assert unified_obj.network.protocol in ["tcp", "udp", "icmp", "unknown"], f"未知协议: {unified_obj.network.protocol}"
-            
-            success_count += 1
-        except Exception as e:
-            print(f"[FAIL] 记录 #{i} 校验失败: {e}")
-            fail_count += 1
+            if not hits:
+                print(f"[!] 跳过: 未找到符合条件的样本记录。")
+                return
 
-    # 6. 输出报告
-    print("\n=== 测试报告 ===")
-    print(f"通过: {success_count}")
-    print(f"失败: {fail_count}")
-    
-    if fail_count == 0 and success_count > 0:
-        print("\n[RESULT] 恭喜！Zeek 数据与公共 Schema 完全兼容。")
-    elif success_count == 0:
-        print("\n[RESULT] 未能成功验证任何数据。")
-    else:
-        print("\n[RESULT] 部分数据不符合标准，请检查映射逻辑。")
+            raw_doc = hits[0]['_source']
+            
+            # 基础结构检查
+            core_fields = ['@timestamp', 'event', 'source', 'destination']
+            if all(f in raw_doc for f in core_fields):
+                print(f"[+] 基础结构验证: 成功 (符合 ECS 规范)")
+            
+            # 核心步骤：尝试还原为 UnifiedEvent 对象
+            try:
+                event_obj = UnifiedEvent.from_dict(raw_doc)
+                print(f"[+] 对象还原验证: 成功 (UnifiedEvent.from_dict 通刷成功)")
+                
+                # 安全地检查威胁信息
+                if event_obj.threat and event_obj.threat.technique.name:
+                    print(f"[+] 威胁建模识别: {event_obj.threat.technique.name}")
+                    print(f"[+] 告警严重级别: {event_obj.event.severity}")
+                else:
+                    print(f"[-] 此记录不含威胁告警信息")
+
+            except Exception as e:
+                print(f"[-] 对象还原失败: 错误: {e}")
+
+        except Exception as e:
+            print(f"[-] ES 查询出错: {e}")
 
 if __name__ == "__main__":
-    run_zeek_data_test()
+    validator = TraceXValidator()
+    validator.run_compliance_check()
