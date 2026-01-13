@@ -162,7 +162,7 @@ for det in report['detailed_results']:
 
 # 写入新索引
 for tagged in tagged_events:
-    es.index(index="attack-events-2026.01.13", body=tagged)
+    es.index(index="attack-events-2026.01.13", document=tagged)
 
 print(f"\n✓ 已将 {len(tagged_events)} 条标注事件写入 attack-events 索引")
 ```

@@ -41,7 +41,7 @@ class TraceXValidator:
         print(f"\n--- 正在验证 {label} ---")
         try:
             # 使用 es 客户端进行搜索
-            res = self.es.es.search(index=self.index_pattern, body=query)
+            res = self.es.es.search(index=self.index_pattern, query=query)
             hits = res['hits']['hits']
             
             if not hits:
