@@ -177,8 +177,8 @@ class TestHostCollector(unittest.TestCase):
             
             # 等待 Filebeat 采集和 ES 刷新
             import time
-            print("[Info] 等待 5 秒让日志入库...")
-            time.sleep(5)
+            print("[Info] 等待 15 秒让日志入库 (Filebeat 默认采集周期为 10s)...")
+            time.sleep(15)
             
             # 查询最近的日志
             res = self.es.search(index="unified-logs-*", q="process.name:cat", size=1)

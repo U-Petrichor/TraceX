@@ -20,7 +20,12 @@ class ESClient:
         
         date_str = datetime.utcnow().strftime("%Y.%m.%d")
         index_name = f"{index_prefix}-{date_str}"
-        result = self.es.index(index=index_name, body=event)
+        # ES 8.x+ 推荐使用 document 替代 body
+        try:
+            result = self.es.index(index=index_name, document=event)
+        except TypeError:
+            # 兼容旧版本
+            result = self.es.index(index=index_name, body=event)
         return event["event"]["id"]
     
     def write_events_bulk(self, events: list, index_prefix: str = "unified-logs") -> dict:
