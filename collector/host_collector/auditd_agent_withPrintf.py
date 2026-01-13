@@ -24,6 +24,7 @@ except ImportError:
 
 # === Configuration ===
 LOG_FILE = "/var/log/audit/audit.log"
+# Shared state file for mutex lock
 STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
 
@@ -123,6 +124,31 @@ def get_inode(filepath):
     except FileNotFoundError:
         return None
 
+def get_display_summary(doc):
+    """Optimize display to avoid 'Unknown' flooding"""
+    process = doc.get('process', {})
+    event = doc.get('event', {})
+    
+    cmd = process.get('command_line')
+    if cmd and cmd != "Unknown":
+        return f"CMD: {cmd}"
+    
+    action = event.get('action')
+    if action:
+        return f"ACTION: {action}"
+        
+    category = event.get('category')
+    if category:
+        return f"CATEGORY: {category}"
+        
+    raw_data = doc.get('raw', {}).get('data', {})
+    if isinstance(raw_data, dict):
+        raw_type = raw_data.get('type')
+        if raw_type:
+            return f"TYPE: {raw_type}"
+            
+    return "Event: (Details hidden)"
+
 # === Main Logic ===
 
 def main():
@@ -152,7 +178,7 @@ def main():
     index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
     
     print(f"[*] Monitoring: {LOG_FILE}")
-    print("[*] Production Mode: Output silenced.")
+    print("[*] Debug Mode: Visual Filters Active.")
 
     # Wait for log file
     while not os.path.exists(LOG_FILE):
@@ -186,7 +212,6 @@ def main():
                         file_obj = open(LOG_FILE, 'r')
                         current_inode = new_inode
                         file_obj.seek(0)
-                        # Update state immediately on rotation
                         save_state(current_inode, 0, True, current_pid)
                         continue
                 except Exception:
@@ -212,6 +237,47 @@ def main():
                 if event:
                     doc = event.to_dict()
                     doc = clean_dict(doc)
+                    
+                    # === Display & Filtering Logic ===
+                    WATCH_LIST = ['cat', 'vim', 'nano', 'sudo', 'su', 'ssh', 'scp', 
+                                  'wget', 'curl', 'nc', 'nmap', 'chmod', 'chown', 
+                                  'useradd', 'passwd', 'python', 'python3', 'bash', 'sh']
+                    
+                    process = doc.get('process', {})
+                    proc_name = process.get('name', '')
+                    cmd_line = process.get('command_line', '')
+                    summary = get_display_summary(doc)
+                    
+                    should_print = False
+                    
+                    # 1. Hard Silence for background process_started noise
+                    if "process_started" in summary:
+                        should_print = False
+                    else:
+                        is_watched_proc = proc_name in WATCH_LIST
+                        is_sensitive_file = any(s in cmd_line for s in ['/etc/passwd', '/etc/shadow', '.ssh', 'authorized_keys'])
+                        is_root_activity = (str(doc.get('user', {}).get('id')) == '0') and (doc.get('event', {}).get('action') != 'process_started')
+                        is_failed = doc.get('event', {}).get('outcome') == 'failure'
+                        
+                        if is_watched_proc or is_sensitive_file or is_root_activity or is_failed:
+                            should_print = True
+                            
+                        if should_print:
+                            RED = '\033[91m'
+                            YELLOW = '\033[93m'
+                            CYAN = '\033[96m'
+                            GREEN = '\033[92m'
+                            RESET = '\033[0m'
+                            
+                            if is_sensitive_file:
+                                print(f"{RED}[!] 🛑 SENSITIVE: {summary}{RESET}")
+                            elif is_failed:
+                                print(f"{YELLOW}[?] ⚠️ FAILED: {summary}{RESET}")
+                            elif is_root_activity:
+                                print(f"{CYAN}[*] ⚡ ROOT: {summary}{RESET}")
+                            else:
+                                print(f"{GREEN}[+] 🟢 WATCHED: {summary}{RESET}")
+
                     try:
                         es.index(index=index_name, document=doc)
                     except Exception as e:
@@ -234,12 +300,10 @@ def main():
     except Exception as e:
         print(f"[-] Critical Error: {e}")
     finally:
-        # Release Lock & Save Final State
         if 'current_inode' in locals() and 'file_obj' in locals():
             release_lock(current_inode, file_obj.tell())
             file_obj.close()
         else:
-            # Fallback if failed before file open
             release_lock(saved_inode, saved_offset)
 
 if __name__ == "__main__":
