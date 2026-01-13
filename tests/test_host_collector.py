@@ -181,11 +181,29 @@ class TestHostCollector(unittest.TestCase):
             time.sleep(15)
             
             # 查询最近的日志
-            res = self.es.search(index="unified-logs-*", q="process.name:cat", size=1)
+            # 注意：process.name 在 ES 中可能是 "cat" 也可能是 "/usr/bin/cat"，且 Pipeline 可能会带引号
+            # 使用更宽泛的查询条件：process.name 包含 cat 且 event.dataset 为 auditd
+            query = {
+                "bool": {
+                    "must": [
+                        {"match": {"event.dataset": "auditd"}},
+                        {"wildcard": {"process.name": "*cat*"}}
+                    ]
+                }
+            }
+            res = self.es.search(index="unified-logs-*", query=query, size=5, sort=[{"@timestamp": "desc"}])
+            
             if res['hits']['total']['value'] > 0:
                 print(f"[Pass] 成功采集到 'cat' 操作日志 (ID: {res['hits']['hits'][0]['_id']})")
+                # 打印一下实际的 process.name 方便调试
+                actual_name = res['hits']['hits'][0]['_source'].get('process', {}).get('name', 'N/A')
+                print(f"[Debug] 实际 process.name: {actual_name}")
             else:
                 print("[Warn] 未能在 ES 中找到刚才的 'cat' 操作日志，请检查 Filebeat 容器状态")
+                print("[Debug] 尝试查询所有最近的 auditd 日志进行排查:")
+                debug_res = self.es.search(index="unified-logs-*", q="event.dataset:auditd", size=3, sort=[{"@timestamp": "desc"}])
+                for hit in debug_res['hits']['hits']:
+                    print(f" - Found log: {hit['_source'].get('process', {}).get('name', 'Unknown')} @ {hit['_source'].get('@timestamp')}")
                 # 这里不强制 fail，因为可能是延时问题
         except Exception as e:
             print(f"[Warn] 模拟操作失败: {e}")
