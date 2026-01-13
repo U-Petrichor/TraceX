@@ -213,9 +213,10 @@ class HostLogParser:
         event.raw = raw_data # 保存完整的聚合数据
         event.message = str(raw_data)
         
-        # 设置时间
-        dt = datetime.fromtimestamp(raw_data["timestamp"])
-        event.timestamp = dt.isoformat() + "Z"
+        # 设置时间 (使用 UTC)
+        # raw_data["timestamp"] 是 UTC epoch
+        dt = datetime.utcfromtimestamp(raw_data["timestamp"])
+        event.timestamp = dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         
         # === 字段映射 ===
         
