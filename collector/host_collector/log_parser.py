@@ -272,8 +272,11 @@ class HostLogParser:
                     event.source.ip = self._session_cache[session_id]
 
             # 文件路径 (从 PATH 记录)
-            # 寻找 nametype=NORMAL 的记录
+            # 寻找 nametype=NORMAL 的记录，若无则尝试任意 PATH 记录 (兼容 CREATE/DELETE 操作)
             path_record = next((r for r in records if r.get("type") == "PATH" and r.get("nametype") == "NORMAL"), None)
+            if not path_record:
+                path_record = next((r for r in records if r.get("type") == "PATH"), None)
+                
             if path_record:
                 event.file.path = path_record.get("name", "")
                 if event.file.path:

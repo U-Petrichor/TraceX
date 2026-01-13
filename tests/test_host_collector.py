@@ -397,5 +397,44 @@ class TestHostCollector(unittest.TestCase):
             
         print("[Pass] 会话重建与 IP 回填验证通过")
 
+    def test_09_process_tree_and_file_ops(self):
+        """测试: 验证进程树构建(ppid)与文件操作关联"""
+        self._print_header("Test 09: Process Tree & File Ops Association")
+        
+        parser = HostLogParser()
+        
+        # 1. Test PPID Extraction
+        log_syscall = 'type=SYSCALL msg=audit(1616450000.123:401): arch=c000003e syscall=59 success=yes exit=0 a0=... ppid=8888 pid=9999 auid=1000 uid=1000 gid=1000 ... comm="bash" exe="/bin/bash" key=(null)'
+        flush_syscall = 'type=EOE msg=audit(1616450000.123:401):'
+        
+        parser.parse(log_syscall, log_type="auditd")
+        event_proc = parser.parse(flush_syscall, log_type="auditd")
+        
+        if event_proc:
+            print(f"  > Process: PID={event_proc.process.pid}, PPID={event_proc.process.parent.pid}")
+            self.assertEqual(event_proc.process.pid, 9999, "PID 提取错误")
+            self.assertEqual(event_proc.process.parent.pid, 8888, "PPID 提取错误 (进程树断裂)")
+        else:
+            self.fail("Process Event parse failed")
+
+        # 2. Test File Operation Association (DELETE)
+        # Auditd DELETE operation usually has nametype=DELETE (or sometimes PARENT + DELETE)
+        # We simulate a case where nametype is DELETE (not NORMAL)
+        log_del_syscall = 'type=SYSCALL msg=audit(1616450000.123:402): arch=c000003e syscall=87 success=yes exit=0 ... ppid=9999 pid=10000 ... comm="rm" exe="/bin/rm"'
+        log_del_path = 'type=PATH msg=audit(1616450000.123:402): item=0 name="/tmp/secret.txt" inode=123 ... nametype=DELETE'
+        flush_del = 'type=EOE msg=audit(1616450000.123:402):'
+        
+        parser.parse(log_del_syscall, log_type="auditd")
+        parser.parse(log_del_path, log_type="auditd")
+        event_del = parser.parse(flush_del, log_type="auditd")
+        
+        if event_del:
+            print(f"  > File Op: {event_del.process.name} -> {event_del.file.path}")
+            self.assertEqual(event_del.file.path, "/tmp/secret.txt", "未能关联 DELETE 操作的文件路径")
+        else:
+            self.fail("Delete Event parse failed")
+            
+        print("[Pass] 进程树与文件关联验证通过")
+
 if __name__ == '__main__':
     unittest.main()
