@@ -177,19 +177,19 @@ class TestHostCollector(unittest.TestCase):
             print("\n[Skip] 跳过主机行为模拟 (非 Linux 环境)")
             return
         
-        print("\n[Info] 注意：请确保 Filebeat 容器已启动 (docker-compose up -d)")
+        print("\n[Info] 注意：请确保 Host Collector Agent (auditd_agent.py) 正在运行")
         print("[Info] 正在模拟主机敏感操作 (读取 /etc/passwd)...")
         try:
             # 触发一个简单的读文件操作，应该被 auditd 捕获
             subprocess.run(["cat", "/etc/passwd"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 等待 Filebeat 采集和 ES 刷新
+            # 等待 Agent 采集和 ES 刷新
             import time
-            print("[Info] 等待 15 秒让日志入库 (Filebeat 默认采集周期为 10s)...")
+            print("[Info] 等待 15 秒让日志入库...")
             time.sleep(15)
             
             # 查询最近的日志
-            # 注意：process.name 在 ES 中可能是 "cat" 也可能是 "/usr/bin/cat"，且 Pipeline 可能会带引号
+            # 注意：process.name 在 ES 中可能是 "cat" 也可能是 "/usr/bin/cat"
             # 使用更宽泛的查询条件：process.name 包含 cat 且 event.dataset 为 auditd
             # 另外，由于可能存在大量网络日志，增加时间范围过滤 (最近 1 分钟)
             from datetime import datetime, timedelta
@@ -213,7 +213,7 @@ class TestHostCollector(unittest.TestCase):
                 actual_name = res['hits']['hits'][0]['_source'].get('process', {}).get('name', 'N/A')
                 print(f"[Debug] 实际 process.name: {actual_name}")
             else:
-                print("[Warn] 未能在 ES 中找到刚才的 'cat' 操作日志，请检查 Filebeat 容器状态")
+                print("[Warn] 未能在 ES 中找到刚才的 'cat' 操作日志，请检查 Agent 运行状态")
                 print("[Debug] 尝试查询最近5分钟的所有 auditd 日志进行排查:")
                 debug_query = {
                     "bool": {
@@ -228,7 +228,7 @@ class TestHostCollector(unittest.TestCase):
                     print(f" - Found log: {hit['_source'].get('process', {}).get('name', 'Unknown')} @ {hit['_source'].get('@timestamp')}")
                 
                 if debug_res['hits']['total']['value'] == 0:
-                     print(" [Debug] 最近5分钟内没有查询到任何 auditd 日志，可能是 Filebeat 未工作或时区问题")
+                     print(" [Debug] 最近5分钟内没有查询到任何 auditd 日志，可能是 Agent 未运行或时区问题")
                 # 这里不强制 fail，因为可能是延时问题
         except Exception as e:
             print(f"[Warn] 模拟操作失败: {e}")
