@@ -3,3 +3,5 @@ requests
 pytest
 black
 flake8
+psutil>=5.9.0
+pyyaml>=6.0
