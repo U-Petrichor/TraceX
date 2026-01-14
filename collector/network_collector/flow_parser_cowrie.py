@@ -145,7 +145,8 @@ class CowrieParser:
                 ip=[raw_log.get("dst_ip", "")]
             ),
             user=UserInfo(
-                name=raw_log.get("username", "unknown")
+                name=raw_log.get("username", "unknown"),
+                session_id=raw_log.get("session", "")  # 关键：用于区分不同攻击会话
             ),
             process=ProcessInfo(
                 command_line=cmd_line,
