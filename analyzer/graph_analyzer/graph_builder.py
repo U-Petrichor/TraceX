@@ -8,7 +8,13 @@ from .atlas_mapper import AtlasMapper
 
 @dataclass
 class GraphNode:
-    id: str; type: str; label: str; atlas_label: str = ""; properties: Dict[str, Any] = field(default_factory=dict)
+    id: str
+    type: str
+    label: str
+    atlas_label: str = ""
+    ttp: str = ""
+    severity: int = 0
+    properties: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass 
 class GraphEdge:
@@ -53,7 +59,16 @@ class GraphBuilder:
 
         node_id = self._md5(f"{host}|{pid}|{exe}|{st}")
 
-        # 2. 内存异常节点挂载（强制连边）
+        # 2. [v6.1] 语义信息提取 (AtlasMapper 可能返回 label 或 (label,severity,ttp))
+        semantic_info = self.atlas_mapper.get_label(e)
+        if isinstance(semantic_info, tuple) and len(semantic_info) >= 3:
+            atlas_label, severity, ttp = semantic_info[0], int(semantic_info[1] or 0), semantic_info[2]
+        elif isinstance(semantic_info, tuple) and len(semantic_info) == 2:
+            atlas_label, severity, ttp = semantic_info[0], int(semantic_info[1] or 0), ""
+        else:
+            atlas_label, severity, ttp = semantic_info, 0, ""
+
+        # 3. 内存异常节点挂载（强制连边，带风险与 TTP 注入）
         if category == "memory":
             anomaly_id = self._md5(f"anomaly|{ts}|{node_id}")
             if anomaly_id not in self._nodes:
@@ -61,19 +76,26 @@ class GraphBuilder:
                     id=anomaly_id,
                     type='memory_anomaly',
                     label='Memory Anomaly',
+                    severity=severity or 9,
+                    ttp=ttp or 'T1055',
                     properties={'details': self._get_val(e, 'memory.anomalies')}
                 )
-            # 强制建立 triggered_anomaly 边
             self._edges.append(GraphEdge(source=node_id, target=anomaly_id, relation='triggered_anomaly', timestamp=ts))
 
-        # 3. 注册主进程节点
+        # 4. 注册主进程节点（带语义注入）
         if node_id not in self._nodes:
             self._nodes[node_id] = GraphNode(
                 id=node_id,
                 type='process',
                 label=os.path.basename(exe) if exe else f"PID:{pid}",
-                atlas_label=self.atlas_mapper.get_label(e),
-                properties={"pid": pid, "cmd": self._get_val(e, 'process.command_line')}
+                atlas_label=atlas_label,
+                severity=severity,
+                ttp=ttp,
+                properties={
+                    "pid": pid,
+                    "command_line": self._get_val(e, 'process.command_line'),
+                    "host": host
+                }
             )
 
         # 4. 父进程回溯 (原有功能)
