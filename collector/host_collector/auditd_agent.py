@@ -217,10 +217,12 @@ class BehaviorAnalyzer:
 
     def run_periodic_scan(self):
         """Run full scan periodically if load is low"""
+        # Initial short delay to allow agent to start up
+        time.sleep(2)
+        
         while True:
-            time.sleep(300) # 5 minutes default
-            
             if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
+                time.sleep(300)
                 continue
                 
             # Smart Load Check
@@ -250,6 +252,9 @@ class BehaviorAnalyzer:
                             continue
             except Exception as e:
                 print(f"[-] Periodic scan error: {e}")
+            
+            # Sleep interval
+            time.sleep(300)
 
 
 
