@@ -131,6 +131,26 @@ class DetectionInfo:
     confidence: float = 0.0                        # 置信度 0.0 - 1.0
     severity: str = ""                             # low, medium, high, critical
 
+# --- v4.1 新增类 (内存检测) ---
+
+@dataclass
+class MemoryAnomaly:
+    """v4.1 新增: 内存异常详情"""
+    type: str = ""          # MEMFD_EXEC, RWX_REGION, ANON_ELF, etc.
+    address: str = ""       # 内存起始地址 (如 7f...)
+    size: int = 0           # 区域大小
+    perms: str = ""         # 权限字符串 (如 rwxp)
+    path: str = ""          # 映射路径 (如 /memfd:...)
+    is_elf: bool = False    # 是否包含 ELF 头
+    risk_level: str = ""    # LOW, MEDIUM, HIGH, CRITICAL
+    confidence: float = 0.0 # 置信度
+    details: str = ""       # 详细描述
+
+@dataclass
+class MemoryInfo:
+    """v4.1 新增: 内存监控信息"""
+    anomalies: List[MemoryAnomaly] = field(default_factory=list)
+
 # --- v4.0 新增类 End ---
 
 @dataclass
@@ -164,6 +184,9 @@ class UnifiedEvent:
     # v4.0 新增字段
     metadata: MetaData = field(default_factory=MetaData)
     detection: DetectionInfo = field(default_factory=DetectionInfo)
+    
+    # v4.1 新增字段
+    memory: MemoryInfo = field(default_factory=MemoryInfo)
     
     def to_dict(self) -> dict:
         """转换为字典（用于存入 ES）"""
@@ -226,6 +249,19 @@ class UnifiedEvent:
                         sub_data["tactic"] = TacticInfo(**sub_data["tactic"])
                     if isinstance(sub_data.get("technique"), dict):
                         sub_data["technique"] = TechniqueInfo(**sub_data["technique"])
+
+                elif field_name == "memory":
+                    if isinstance(sub_data.get("anomalies"), list):
+                        anomalies_list = sub_data["anomalies"]
+                        converted_anomalies = []
+                        for item in anomalies_list:
+                            if isinstance(item, dict):
+                                # 过滤掉不在 dataclass 定义中的多余字段
+                                valid_item_keys = {k: v for k, v in item.items() if k in MemoryAnomaly.__dataclass_fields__}
+                                converted_anomalies.append(MemoryAnomaly(**valid_item_keys))
+                            else:
+                                converted_anomalies.append(item)
+                        sub_data["anomalies"] = converted_anomalies
                 
                 # 直接转换
                 try:
@@ -250,6 +286,7 @@ class UnifiedEvent:
         # --- v4.0 新增字段转换 ---
         safe_convert("metadata", MetaData, data)
         safe_convert("detection", DetectionInfo, data)
+        safe_convert("memory", MemoryInfo, data)
 
         # 3. 创建主对象
         valid_keys = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
