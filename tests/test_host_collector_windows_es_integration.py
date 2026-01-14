@@ -38,8 +38,9 @@ class TestWindowsESIntegration(unittest.TestCase):
             
         self.parser = HostLogParser()
         # Use the specific index name requested for presentation
-        # Dynamic index name: unified-logs-{YYYY.MM.DD}
-        self.index_name = f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
+        # Dynamic index name: unified-logs-{YYYY.MM.DD} (Beijing Time UTC+8)
+        beijing_time = datetime.utcnow() + timedelta(hours=8)
+        self.index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
 
     def remove_empty_fields(self, data):
         """Recursively remove keys with empty string values to prevent ES mapping errors."""
