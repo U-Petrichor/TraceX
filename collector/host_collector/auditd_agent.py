@@ -39,7 +39,20 @@ STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
 
 # Memory Scanner Configuration
-MEM_SCANNER_BIN = os.path.join(current_dir, "mem_scanner/bin/scanner")
+_PROD_SCANNER = "/opt/tracex/bin/mem_scanner"
+_DEV_SCANNER = os.path.join(current_dir, "mem_scanner/bin/scanner")
+
+if os.path.exists(_PROD_SCANNER):
+    MEM_SCANNER_BIN = _PROD_SCANNER
+    print(f"[*] Memory Scanner: Found in PRODUCTION path: {MEM_SCANNER_BIN}")
+elif os.path.exists(_DEV_SCANNER):
+    MEM_SCANNER_BIN = _DEV_SCANNER
+    print(f"[*] Memory Scanner: Found in DEVELOPMENT path: {MEM_SCANNER_BIN}")
+else:
+    # Default to Dev path even if missing, to let checks fail naturally later or show specific error
+    MEM_SCANNER_BIN = _DEV_SCANNER
+    print(f"[!] Warning: MemScanner binary not found in Prod ({_PROD_SCANNER}) or Dev ({_DEV_SCANNER}) paths.")
+
 if platform.system() == 'Windows':
     MEM_SCANNER_BIN = "" # Disabled on Windows
 
