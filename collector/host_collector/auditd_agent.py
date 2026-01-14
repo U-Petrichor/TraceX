@@ -8,6 +8,7 @@ import threading
 import subprocess
 import platform
 import psutil
+import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -163,8 +164,18 @@ class BehaviorAnalyzer:
 
     def _ingest_scan_result(self, data, reason):
         pid = data.get("pid")
-        anomalies = data.get("anomalies", [])
+        raw_anomalies = data.get("anomalies", [])
         
+        # Filter anomalies: Only keep HIGH or CRITICAL
+        # This reduces noise from system processes (LOW/MEDIUM)
+        anomalies = [
+            a for a in raw_anomalies 
+            if a.get("risk_level") in ["HIGH", "CRITICAL"]
+        ]
+        
+        if not anomalies:
+            return
+
         # Create a deterministic signature of the current anomalies
         # We sort keys to ensure consistent JSON string
         try:
@@ -204,7 +215,7 @@ class BehaviorAnalyzer:
                 "executable": data.get("exe")
             },
             "memory": {
-                "anomalies": data.get("anomalies", [])
+                "anomalies": anomalies
             }
         }
         
@@ -335,6 +346,11 @@ def get_inode(filepath):
     except FileNotFoundError:
         return None
 
+def get_current_index_name():
+    """Generate index name based on Beijing Time (UTC+8)"""
+    beijing_time = datetime.utcnow() + timedelta(hours=8)
+    return f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
+
 # === Main Logic ===
 def main():
     if hasattr(os, 'geteuid') and os.geteuid() != 0:
@@ -375,11 +391,15 @@ def main():
     NOISE_PROCS = {'sleep', 'date', 'uptime', 'awk', 'sed', 'head', 'tail', 'cut', 'tr'}
 
     # === Initialize Behavior Analyzer ===
-    analyzer = BehaviorAnalyzer(es, lambda: index_name)
+    # Use dynamic index name for rotation
+    analyzer = BehaviorAnalyzer(es, get_current_index_name)
     threading.Thread(target=analyzer.run_periodic_scan, daemon=True).start()
 
     try:
         while True:
+            # Refresh index name periodically (for main loop)
+            current_index_name = get_current_index_name()
+            
             line = file_obj.readline()
 
             if not line:
