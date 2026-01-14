@@ -49,6 +49,7 @@ class BehaviorAnalyzer:
         self.get_index_name = index_name_func
         self.pid_events = defaultdict(list)  # {pid: [(syscall, timestamp)]}
         self.scan_history = {} # {pid: last_scan_timestamp}
+        self.alert_history = {} # {pid: last_alert_timestamp}
         self.lock = threading.Lock()
         
         # High Risk Sequence Definitions
