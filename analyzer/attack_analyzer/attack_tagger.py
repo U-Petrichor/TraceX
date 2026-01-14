@@ -343,10 +343,13 @@ class AttackAnalyzer:
         self.detector = SigmaDetector(rules_dir)
         self.tagger = ATTACKTagger()
         self.rules_dir = rules_dir
+        self._initialized = False
 
     def initialize(self):
         """初始化：加载本地 Sigma 规则"""
-        return self.detector.load_rules()
+        count = self.detector.load_rules()
+        self._initialized = True
+        return count
 
     def analyze_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
         detections = self.detector.detect(event)
