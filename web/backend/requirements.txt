@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+elasticsearch
+pydantic
+python-multipart
+requests
