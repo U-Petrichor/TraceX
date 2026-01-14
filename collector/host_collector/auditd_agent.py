@@ -4,7 +4,12 @@ import sys
 import json
 import warnings
 import socket
-from datetime import datetime
+import threading
+import subprocess
+import platform
+import psutil
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 # Suppress ES security warnings
 warnings.filterwarnings("ignore", message=".*Elasticsearch built-in security features are not enabled.*")
@@ -24,7 +29,6 @@ except ImportError:
 try:
     from elasticsearch import Elasticsearch
 except ImportError:
-    # Quietly exit or print only on fatal error as requested
     print("[-] Error: 'elasticsearch' module missing.")
     sys.exit(1)
 
@@ -32,6 +36,194 @@ except ImportError:
 LOG_FILE = "/var/log/audit/audit.log"
 STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
+
+# Memory Scanner Configuration
+MEM_SCANNER_BIN = os.path.join(current_dir, "mem_scanner/bin/scanner")
+if platform.system() == 'Windows':
+    MEM_SCANNER_BIN = "" # Disabled on Windows
+    
+# === Behavior Analysis & Memory Monitoring ===
+class BehaviorAnalyzer:
+    def __init__(self, es_client, index_name_func):
+        self.es = es_client
+        self.get_index_name = index_name_func
+        self.pid_events = defaultdict(list)  # {pid: [(syscall, timestamp)]}
+        self.scan_history = {} # {pid: last_scan_timestamp}
+        self.lock = threading.Lock()
+        
+        # High Risk Sequence Definitions
+        self.sequences = [
+            # Sequence 1: Ptrace Injection
+            {
+                "events": ["ptrace", "write"],
+                "window": 5.0,
+                "name": "Ptrace Injection"
+            },
+            # Sequence 2: Fileless Execution
+            {
+                "events": ["memfd_create", "execve"], 
+                "window": 5.0,
+                "name": "Fileless Execution"
+            },
+            # Sequence 3: Memory Tampering
+            {
+                "events": ["write", "mprotect"],
+                "window": 5.0,
+                "name": "Memory Tampering"
+            }
+        ]
+
+    def record_event(self, pid, syscall):
+        if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
+            return
+
+        now = time.time()
+        with self.lock:
+            # Add event to history
+            self.pid_events[pid].append((syscall, now))
+            
+            # Prune old events (> 10s)
+            self.pid_events[pid] = [e for e in self.pid_events[pid] if now - e[1] < 10.0]
+            
+            # Check sequences
+            self._check_sequences(pid)
+
+    def _check_sequences(self, pid):
+        events = [e[0] for e in self.pid_events[pid]]
+        
+        should_scan = False
+        reason = ""
+        
+        # Check explicit sequences
+        for seq in self.sequences:
+            required = seq["events"]
+            # Simple check: do all required events exist in recent history in order?
+            # This is a simplified subsequence check
+            last_idx = -1
+            found_count = 0
+            for req_evt in required:
+                try:
+                    idx = events.index(req_evt, last_idx + 1)
+                    last_idx = idx
+                    found_count += 1
+                except ValueError:
+                    break
+            
+            if found_count == len(required):
+                should_scan = True
+                reason = seq["name"]
+                break
+        
+        # Check single high-risk syscalls
+        if not should_scan:
+            if "ptrace" in events:
+                should_scan = True
+                reason = "Suspicious Ptrace"
+            elif "memfd_create" in events:
+                should_scan = True
+                reason = "Memfd Creation"
+        
+        if should_scan:
+            self._trigger_scan(pid, reason)
+
+    def _trigger_scan(self, pid, reason):
+        now = time.time()
+        last_scan = self.scan_history.get(pid, 0)
+        
+        # Debounce: 5 seconds
+        if now - last_scan < 5.0:
+            return
+            
+        self.scan_history[pid] = now
+        
+        # Run scan in background thread to avoid blocking main loop
+        threading.Thread(target=self._run_scan, args=(pid, reason), daemon=True).start()
+
+    def _run_scan(self, pid, reason):
+        try:
+            # Timeout is crucial to prevent zombie processes
+            result = subprocess.run(
+                [MEM_SCANNER_BIN, "--pid", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    data = json.loads(result.stdout)
+                    self._ingest_scan_result(data, reason)
+                except json.JSONDecodeError:
+                    pass
+        except subprocess.TimeoutExpired:
+            pass # Scan took too long, ignore
+        except Exception as e:
+            print(f"[-] Scan error for PID {pid}: {e}")
+
+    def _ingest_scan_result(self, data, reason):
+        # Convert to UnifiedEvent format
+        doc = {
+            "@timestamp": datetime.utcnow().isoformat() + "Z",
+            "host": {"name": socket.gethostname()},
+            "event": {
+                "category": "memory",
+                "action": "anomaly_detected",
+                "severity": 10, # Memory anomalies are always critical
+                "reason": reason
+            },
+            "process": {
+                "pid": data.get("pid"),
+                "executable": data.get("exe")
+            },
+            "memory": {
+                "anomalies": data.get("anomalies", [])
+            }
+        }
+        
+        try:
+            index = self.get_index_name()
+            self.es.index(index=index, document=doc)
+            print(f"[!] Memory Anomaly Detected (PID {data.get('pid')}): {reason}")
+        except Exception as e:
+            print(f"[-] ES Index Error: {e}")
+
+    def run_periodic_scan(self):
+        """Run full scan periodically if load is low"""
+        while True:
+            time.sleep(300) # 5 minutes default
+            
+            if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
+                continue
+                
+            # Smart Load Check
+            try:
+                if psutil.cpu_percent() > 80.0:
+                    time.sleep(300) # Wait another 5 mins if busy
+                    continue
+            except ImportError:
+                pass # psutil missing, ignore check
+                
+            try:
+                # Run full scan
+                result = subprocess.run(
+                    [MEM_SCANNER_BIN, "--scan-all"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60 # Full scan might take longer
+                )
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        try:
+                            data = json.loads(line)
+                            self._ingest_scan_result(data, "Periodic Scan")
+                        except:
+                            continue
+            except Exception as e:
+                print(f"[-] Periodic scan error: {e}")
+
+
 
 # === State & Lock Management ===
 def load_state():
@@ -149,9 +341,14 @@ def main():
     # Noise List
     NOISE_PROCS = {'sleep', 'date', 'uptime', 'awk', 'sed', 'head', 'tail', 'cut', 'tr'}
 
+    # === Initialize Behavior Analyzer ===
+    analyzer = BehaviorAnalyzer(es, lambda: index_name)
+    threading.Thread(target=analyzer.run_periodic_scan, daemon=True).start()
+
     try:
         while True:
             line = file_obj.readline()
+
             if not line:
                 try:
                     new_inode = get_inode(LOG_FILE)
@@ -191,7 +388,31 @@ def main():
                     action = event_info.get('action', '')
                     user_name = user.get('name', '')
                     
+                    # === Behavior Hook ===
+                    # Extract PID and Syscall for analysis
+                    try:
+                        pid = int(process.get('pid', 0))
+                        syscall = ""
+                        # Try to extract syscall from action or raw log if available
+                        # Action usually maps to syscall for SYSCALL events
+                        if doc.get('event', {}).get('category') == 'process':
+                            # Infer from action or raw event
+                            # Simplified mapping:
+                            if action == 'process_started': syscall = 'execve'
+                            elif 'ptrace' in line_str: syscall = 'ptrace' # Fallback to raw check
+                            elif 'memfd_create' in line_str: syscall = 'memfd_create'
+                            elif 'mprotect' in line_str: syscall = 'mprotect'
+                        
+                        # Direct SYSCALL parsing from parser output if available
+                        # (assuming parser enriches this info in future, for now fallback to string match)
+                        
+                        if pid > 0 and syscall:
+                            analyzer.record_event(pid, syscall)
+                    except:
+                        pass
+                    
                     # 1. Drop process_started without cmd_line
+
                     if action == 'process_started' and not cmd_line:
                         continue
 
