@@ -18,25 +18,33 @@ MAP_ANONYMOUS = 0x20
 def simulate_attack():
     print(f"[+] Starting Memory Attack Simulation (PID: {os.getpid()})")
     
-    # 1. Create memfd
+    # Generate unique timestamp for this run
+    ts = int(time.time())
+    
+    # 1. Create memfd with unique name
     libc = ctypes.CDLL(None)
     syscall = libc.syscall
     
     print("[*] invoking memfd_create...")
-    name = b"malicious_payload"
+    # Append timestamp to name to ensure unique path in scanner report
+    # This ensures auditd_agent generates a unique alert signature
+    name = f"malicious_payload_{ts}".encode('utf-8')
     fd = syscall(__NR_memfd_create, name, MFD_CLOEXEC)
     
     if fd < 0:
         print("[-] memfd_create failed")
         sys.exit(1)
         
-    print(f"[+] memfd created (fd={fd})")
+    print(f"[+] memfd created (fd={fd}, name={name.decode()})")
 
     # 2. Write fake ELF header to it
     # \x7fELF...
-    payload = b"\x7fELF\x02\x01\x01\x00" + b"\x90" * 1024 # Fake ELF + NOP sled
+    # Also embed timestamp in payload for unique content
+    payload = b"\x7fELF\x02\x01\x01\x00" + b"\x90" * 1024 
+    payload += f"TIMESTAMP={ts}".encode('utf-8')
+    
     os.write(fd, payload)
-    print(f"[+] Wrote {len(payload)} bytes to memfd (Fake ELF header)")
+    print(f"[+] Wrote {len(payload)} bytes to memfd (Fake ELF header + TS)")
 
     # 3. Mmap it as RWX (Read + Write + Execute)
     # This is a huge red flag for our scanner
