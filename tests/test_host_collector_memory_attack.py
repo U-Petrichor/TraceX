@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import mmap
+import signal
 
 # Constants for syscalls (x86_64)
 __NR_memfd_create = 319
@@ -70,13 +71,20 @@ def simulate_attack():
     print(f"[+] Mapped RWX memory at {hex(addr)}")
     print("[!] ATTACK SIMULATED. Sleeping for 300 seconds to allow scanning...")
     print("[!] Press Ctrl+C to stop.")
+
+    def cleanup(signum, frame):
+        print(f"\n[*] Signal {signum} received. Killing process {os.getpid()}...")
+        try:
+            os.close(fd)
+        except:
+            pass
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, cleanup)
+    signal.signal(signal.SIGTERM, cleanup)
     
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[*] Exiting...")
-        os.close(fd)
+    while True:
+        time.sleep(1)
 
 if __name__ == "__main__":
     simulate_attack()
