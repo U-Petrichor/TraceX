@@ -30,85 +30,90 @@ class AtlasMapper:
         # 按优先级排序，越靠前优先级越高
         
         # === 进程/可执行文件规则 ===
-        self.executable_patterns: List[Tuple[str, str, str]] = [
+        # 采用四元组格式：(pattern, label, severity, ttp)
+        self.executable_patterns: List[Tuple[str, str, int, str]] = [
             # 侦察工具
-            (r'.*/?(id|whoami|uname|hostname|ifconfig|ip|netstat)$', 'RECON_COMMAND', '系统侦察命令'),
-            (r'.*/?(cat|head|tail|less|more|grep|find|locate)$', 'FILE_READER', '文件读取命令'),
-            (r'.*/?(nmap|masscan|zmap)$', 'NETWORK_SCANNER', '网络扫描器'),
-            
+            (r'.*/?(id|whoami|uname|hostname|ifconfig|ip|netstat)$', 'RECON_COMMAND', 3, 'T1082'),
+            (r'.*/?(cat|head|tail|less|more|grep|find|locate)$', 'FILE_READER', 3, 'T1005'),
+            (r'.*/?(nmap|masscan|zmap)$', 'NETWORK_SCANNER', 5, 'T1595'),
+
             # 下载/传输工具
-            (r'.*/?(curl|wget|fetch)$', 'SUSPICIOUS_DOWNLOADER', '可疑下载器'),
-            (r'.*/?(scp|rsync|ftp|sftp|nc|ncat|netcat)$', 'DATA_TRANSFER_TOOL', '数据传输工具'),
-            
+            (r'.*/?(curl|wget|fetch)$', 'SUSPICIOUS_DOWNLOADER', 4, 'T1105'),
+            (r'.*/?(scp|rsync|ftp|sftp|nc|ncat|netcat)$', 'DATA_TRANSFER_TOOL', 5, 'T1567'),
+
             # Shell/解释器
-            (r'.*/?(bash|sh|zsh|dash|csh|tcsh|ksh)$', 'SHELL_EXECUTION', 'Shell 执行'),
-            (r'.*/?(python[23]?|perl|ruby|php|node)$', 'SCRIPT_INTERPRETER', '脚本解释器'),
-            
+            (r'.*/?(bash|sh|zsh|dash|csh|tcsh|ksh)$', 'SHELL_EXECUTION', 2, 'T1059'),
+            (r'.*/?(python[23]?|perl|ruby|php|node)$', 'SCRIPT_INTERPRETER', 2, 'T1059'),
+
             # 权限相关
-            (r'.*/?(sudo|su|doas|pkexec)$', 'PRIVILEGE_ESCALATION', '提权工具'),
-            (r'.*/?(chmod|chown|setfacl)$', 'PERMISSION_CHANGE', '权限变更'),
-            
+            (r'.*/?(sudo|su|doas|pkexec)$', 'PRIVILEGE_ESCALATION', 4, 'T1548.001'),
+            (r'.*/?(chmod|chown|setfacl)$', 'PERMISSION_CHANGE', 3, 'T1222.002'),
+
             # 持久化相关
-            (r'.*/?(crontab|systemctl|service)$', 'PERSISTENCE_MECHANISM', '持久化机制'),
-            
+            (r'.*/?(crontab|systemctl|service)$', 'PERSISTENCE_MECHANISM', 5, 'T1543'),
+
             # 编译/打包
-            (r'.*/?(gcc|g\+\+|make|ld)$', 'COMPILATION_TOOL', '编译工具'),
-            (r'.*/?(tar|gzip|zip|unzip|7z)$', 'ARCHIVE_TOOL', '压缩工具'),
+            (r'.*/?(gcc|g\+\+|make|ld)$', 'COMPILATION_TOOL', 4, 'T1027.004'),
+            (r'.*/?(tar|gzip|zip|unzip|7z)$', 'ARCHIVE_TOOL', 3, 'T1560'),
         ]
         
         # === 文件路径规则 ===
-        self.file_patterns: List[Tuple[str, str, str]] = [
-            # 临时文件
-            (r'^/tmp/.*', 'TEMP_FILE_ACCESS', '临时文件访问'),
-            (r'^/var/tmp/.*', 'TEMP_FILE_ACCESS', '临时文件访问'),
-            (r'^/dev/shm/.*', 'TEMP_FILE_ACCESS', '共享内存临时文件'),
+        self.file_patterns: List[Tuple[str, str, int, str]] = [
+            # 临时/内存分区
+            (r'^/dev/shm/.*', 'IN_MEMORY_STAGING', 7, 'T1027.004'),
+            (r'^/tmp/.*', 'TEMP_FILE_ACCESS', 4, 'T1564'),
+            (r'^/var/tmp/.*', 'TEMP_FILE_ACCESS', 4, 'T1564'),
             
             # Web 目录
-            (r'.*/var/www/html/.*', 'WEB_ROOT_ACCESS', 'Web 根目录访问'),
-            (r'.*/htdocs/.*', 'WEB_ROOT_ACCESS', 'Web 根目录访问'),
-            (r'.*/wwwroot/.*', 'WEB_ROOT_ACCESS', 'Web 根目录访问'),
-            (r'.*/public_html/.*', 'WEB_ROOT_ACCESS', 'Web 根目录访问'),
+            (r'.*/var/www/html/.*', 'WEB_ROOT_ACCESS', 6, 'T1505.003'),
+            (r'.*/htdocs/.*', 'WEB_ROOT_ACCESS', 6, 'T1505.003'),
+            (r'.*/wwwroot/.*', 'WEB_ROOT_ACCESS', 6, 'T1505.003'),
+            (r'.*/public_html/.*', 'WEB_ROOT_ACCESS', 6, 'T1505.003'),
             
             # WebShell 文件
-            (r'.*\.php$', 'PHP_SCRIPT', 'PHP 脚本'),
-            (r'.*\.jsp$', 'JSP_SCRIPT', 'JSP 脚本'),
-            (r'.*\.asp$', 'ASP_SCRIPT', 'ASP 脚本'),
-            (r'.*\.aspx$', 'ASPX_SCRIPT', 'ASPX 脚本'),
+            (r'.*\.php$', 'PHP_SCRIPT', 5, 'T1505.003'),
+            (r'.*\.jsp$', 'JSP_SCRIPT', 5, 'T1505.003'),
+            (r'.*\.asp$', 'ASP_SCRIPT', 5, 'T1505.003'),
+            (r'.*\.aspx$', 'ASPX_SCRIPT', 5, 'T1505.003'),
             
             # 敏感文件
-            (r'^/etc/passwd$', 'SENSITIVE_FILE', '敏感文件（passwd）'),
-            (r'^/etc/shadow$', 'SENSITIVE_FILE', '敏感文件（shadow）'),
-            (r'^/etc/sudoers$', 'SENSITIVE_FILE', '敏感文件（sudoers）'),
-            (r'.*/.ssh/.*', 'SSH_RELATED', 'SSH 相关文件'),
-            (r'.*/.bash_history$', 'HISTORY_FILE', '命令历史文件'),
+            (r'^/etc/passwd$', 'SENSITIVE_FILE', 8, 'T1003.008'),
+            (r'^/etc/shadow$', 'SENSITIVE_FILE', 8, 'T1003.008'),
+            (r'^/etc/sudoers$', 'SENSITIVE_FILE', 8, 'T1003.008'),
+            (r'.*/.ssh/.*', 'SSH_RELATED', 7, 'T1552.004'),
+            (r'.*/.bash_history$', 'HISTORY_FILE', 4, 'T1552.003'),
             
             # 日志文件
-            (r'^/var/log/.*', 'LOG_FILE_ACCESS', '日志文件访问'),
-            
+            (r'^/var/log/.*', 'LOG_FILE_ACCESS', 2, 'T1562.006'),
+
             # Cowrie 下载目录
-            (r'.*/cowrie/downloads/.*', 'COWRIE_DOWNLOAD', '蜜罐下载文件'),
+            (r'.*/cowrie/downloads/.*', 'COWRIE_DOWNLOAD', 8, 'T1105'),
         ]
         
         # === 命令行规则 ===
-        self.cmdline_patterns: List[Tuple[str, str, str]] = [
+        self.cmdline_patterns: List[Tuple[str, str, int, str]] = [
             # 反弹 Shell
-            (r'bash\s+-i', 'REVERSE_SHELL', '反弹 Shell'),
-            (r'/dev/tcp/', 'REVERSE_SHELL', '反弹 Shell'),
-            (r'nc\s+-e', 'REVERSE_SHELL', '反弹 Shell'),
-            (r'ncat\s+-e', 'REVERSE_SHELL', '反弹 Shell'),
-            
+            (r'bash\s+-i', 'REVERSE_SHELL', 10, 'T1059.004'),
+            (r'/dev/tcp/', 'REVERSE_SHELL', 10, 'T1059.004'),
+            (r'nc\s+-e', 'REVERSE_SHELL', 10, 'T1059.004'),
+            (r'ncat\s+-e', 'REVERSE_SHELL', 10, 'T1059.004'),
+
             # 下载执行 (必须在通用管道之前)
-            (r'curl.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', '下载并执行'),
-            (r'wget.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', '下载并执行'),
-            (r'curl.*-o\s+/tmp/', 'DOWNLOAD_TO_TEMP', '下载到临时目录'),
-            (r'wget.*-O\s+/tmp/', 'DOWNLOAD_TO_TEMP', '下载到临时目录'),
+            (r'curl.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', 9, 'T1105'),
+            (r'wget.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', 9, 'T1105'),
+            (r'curl.*-o\s+/tmp/', 'DOWNLOAD_TO_TEMP', 8, 'T1105'),
+            (r'wget.*-O\s+/tmp/', 'DOWNLOAD_TO_TEMP', 8, 'T1105'),
             
             # Base64 编码执行
-            (r'base64\s+-d', 'ENCODED_EXECUTION', '编码执行'),
-            
+            (r'base64\s+-d', 'ENCODED_EXECUTION', 7, 'T1027'),
+
             # 通用管道 (优先级较低)
-            (r'\|\s*bash', 'PIPE_TO_SHELL', '管道到 Shell'),
-            (r'\|\s*sh', 'PIPE_TO_SHELL', '管道到 Shell'),
+            (r'\|\s*bash', 'PIPE_TO_SHELL', 6, 'T1059.004'),
+            (r'\|\s*sh', 'PIPE_TO_SHELL', 6, 'T1059.004'),
+
+            # v6.1 新增：破坏性/敏感命令
+            (r'rm\s+-rf\s+/', 'DESTRUCTIVE_ACTION', 10, 'T1485'),
+            (r'cat\s+/etc/passwd|cat\s+/etc/shadow', 'SENSITIVE_FILE_READ', 8, 'T1003.008')
         ]
         
         # === 网络事件规则 ===
@@ -130,21 +135,14 @@ class AtlasMapper:
         # === v5.5 新增：内存异常类型映射 ===
         # 将内存异常类型映射到语义标签
         self.memory_anomaly_labels: dict = {
-            # 无文件攻击相关
-            'MEMFD_EXEC': ('FILELESS_ATTACK', '无文件攻击（memfd 执行）'),
-            'ANON_ELF': ('FILELESS_ATTACK', '无文件攻击（匿名 ELF）'),
-            
-            # 代码注入相关
-            'RWX_REGION': ('CODE_INJECTION', '代码注入（RWX 内存区域）'),
-            'STACK_EXEC': ('CODE_INJECTION', '代码注入（栈执行）'),
-            'HEAP_EXEC': ('CODE_INJECTION', '代码注入（堆执行）'),
-            
-            # 进程空洞/反射加载
-            'PROCESS_HOLLOWING': ('PROCESS_HOLLOWING', '进程空洞攻击'),
-            'REFLECTIVE_LOAD': ('REFLECTIVE_LOADING', '反射式 DLL 加载'),
-            
-            # 通用异常
-            'SUSPICIOUS_MEMORY': ('MEMORY_ANOMALY', '可疑内存区域'),
+            'MEMFD_EXEC': ('FILELESS_ATTACK', 9, 'T1620'),
+            'ANON_ELF': ('FILELESS_ATTACK', 9, 'T1620'),
+            'RWX_REGION': ('CODE_INJECTION', 8, 'T1055'),
+            'STACK_EXEC': ('CODE_INJECTION', 8, 'T1055'),
+            'HEAP_EXEC': ('CODE_INJECTION', 8, 'T1055'),
+            'PROCESS_HOLLOWING': ('PROCESS_HOLLOWING', 9, 'T1055.012'),
+            'REFLECTIVE_LOAD': ('REFLECTIVE_LOADING', 9, 'T1620'),
+            'SUSPICIOUS_MEMORY': ('MEMORY_ANOMALY', 5, 'T1055'),
         }
         
         # 编译正则表达式（提高性能）
@@ -152,19 +150,20 @@ class AtlasMapper:
     
     def _compile_patterns(self) -> None:
         """预编译正则表达式"""
-        self._exe_compiled = [(re.compile(p, re.IGNORECASE), l, d) 
-                              for p, l, d in self.executable_patterns]
-        self._file_compiled = [(re.compile(p, re.IGNORECASE), l, d) 
-                               for p, l, d in self.file_patterns]
-        self._cmd_compiled = [(re.compile(p, re.IGNORECASE), l, d) 
-                              for p, l, d in self.cmdline_patterns]
+        self._exe_compiled = [(re.compile(p, re.IGNORECASE), l, s, t) 
+                              for p, l, s, t in self.executable_patterns]
+        self._file_compiled = [(re.compile(p, re.IGNORECASE), l, s, t) 
+                               for p, l, s, t in self.file_patterns]
+        self._cmd_compiled = [(re.compile(p, re.IGNORECASE), l, s, t) 
+                              for p, l, s, t in self.cmdline_patterns]
         self._net_compiled = [(re.compile(p, re.IGNORECASE), l, d) 
                               for p, l, d in self.network_patterns]
     
     def _get_val(self, obj: Any, path: str, default: Any = "") -> Any:
         """安全获取嵌套字段值"""
         parts = path.split('.')
-        curr = obj
+        # 支持包装对象（如带 _data 属性的对象）
+        curr = getattr(obj, '_data', obj)
         try:
             for p in parts:
                 if curr is None:
@@ -184,13 +183,21 @@ class AtlasMapper:
         在规则列表中查找第一个匹配
         
         Returns:
-            (标签, 描述) 或 None
+            (标签, severity, ttp) 或 None
         """
         if not target:
             return None
-        for regex, label, desc in patterns:
+        for entry in patterns:
+            # 支持两种编译后元组：
+            # (regex, label, desc) 或 (regex, label, severity, ttp)
+            if len(entry) == 3:
+                regex, label, desc = entry
+                severity = 0
+                ttp = ''
+            else:
+                regex, label, severity, ttp = entry
             if regex.search(target):
-                return label, desc
+                return label, severity, ttp
         return None
     
     def get_label(self, event: Any) -> str:
@@ -389,7 +396,7 @@ class AtlasMapper:
                 
                 # 尝试从映射表获取标签
                 if anomaly_type in self.memory_anomaly_labels:
-                    label, _ = self.memory_anomaly_labels[anomaly_type]
+                    label, _, _ = self.memory_anomaly_labels[anomaly_type]
                     return label
                 
                 # 根据风险等级返回通用标签

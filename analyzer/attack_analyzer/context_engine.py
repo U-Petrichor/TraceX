@@ -97,36 +97,32 @@ class ContextEngine:
                 body={"query": query, "size": 500, "sort": [{"@timestamp": "desc"}]},
                 ignore_unavailable=True
             )
+            hits = resp.get('hits', {}).get('hits', [])
+            seeds = []
+
+            for hit in hits:
+                source = hit.get('_source', {})
+                # 保持使用原有复杂评估逻辑，但对注入的 confidence 应用 v6.1 最低阈值优化
+                threat_analysis = self.evaluate_threat(source)
+                score = threat_analysis.get('score', 0)
+
+                is_high_risk = score >= min_score
+                if 'cowrie' in str(source.get('event', {}).get('dataset', '')):
+                    is_high_risk = True
+                    score = max(score, 100)
+
+                if is_high_risk:
+                    # 动态注入 threat.confidence（采用 v6.1 建议的下限 50）
+                    if 'threat' not in source or source['threat'] is None:
+                        source['threat'] = {}
+                    source['threat']['confidence'] = max(score, 50) / 100.0
+
+                    seeds.append(SafeEventWrapper(source))
+
+            return seeds
         except Exception as e:
             logger.error(f"ES Search failed: {e}")
             return []
-
-        hits = resp.get('hits', {}).get('hits', [])
-        seeds = []
-
-        for hit in hits:
-            source = hit.get('_source', {})
-            event_obj = SafeEventWrapper(source)
-            
-            threat_analysis = self.evaluate_threat(source)
-            score = threat_analysis.get('score', 0)
-            
-            is_high_risk = score >= min_score
-            if 'cowrie' in str(source.get('event', {}).get('dataset', '')):
-                is_high_risk = True
-                score = max(score, 100)
-            
-            if is_high_risk:
-                # 动态注入 threat.confidence，供组员4使用
-                # SafeEventWrapper 是只读代理，我们需要直接修改内部字典
-                if 'threat' not in source or source['threat'] is None:
-                    source['threat'] = {}
-                source['threat']['confidence'] = score / 100.0
-                
-                # 重新包装以包含新数据
-                seeds.append(SafeEventWrapper(source))
-
-        return seeds
 
     # =========================================================================
     # 核心任务 1: 威胁研判 (Scoring)
@@ -248,38 +244,53 @@ class ContextEngine:
             
         return score, reasons
 
-    def find_related_events(self, anchor: Any, window: int = 60) -> List[Dict[str, Any]]:
-        # 修复点：确保 anchor 是 Wrapper 时也能工作
+    def find_related_events(self, anchor: Any, window: int = 30) -> List[Dict[str, Any]]:
+        """查找关联事件：集成 v6.1 优化（窗口30s、PID/PPID 因果关联、basename 空间模糊匹配）
+
+        保留原有行为：如果没有可用 should 因子则返回空。
+        """
         anchor_ts = self._get_val(anchor, 'timestamp') or self._get_val(anchor, '@timestamp')
         host = self._get_val(anchor, 'host.name')
         if not anchor_ts or not host: return []
-        
+
         dt = self._parse_timestamp(anchor_ts)
         if not dt: return []
-        
+
         start_t = (dt - timedelta(seconds=window)).isoformat()
         end_t = (dt + timedelta(seconds=window)).isoformat()
-        
+
         must = [{"range": {"@timestamp": {"gte": start_t, "lte": end_t}}}, {"term": {"host.name": host}}]
         should = []
-        
-        path = self._get_val(anchor, 'file.path')
-        if path and path not in ["", "unknown"]:
-            should.append({"term": {"file.path": path}})
-            should.append({"match": {"file.name": os.path.basename(path)}})
-        
+
+        # 因果关联（PID/PPID）
+        pid = self._get_val(anchor, 'process.pid')
+        ppid = self._get_val(anchor, 'process.parent.pid')
+        if pid:
+            should.append({"term": {"process.parent.pid": pid}})
+        if ppid:
+            should.append({"term": {"process.pid": ppid}})
+
+        # 空间模糊关联（基于 basename，用于临时/内存/web root 区域）
+        path = self._get_val(anchor, 'file.path', '') or ''
+        if path and any(p in path for p in ['/tmp/', '/dev/shm/', '/var/www/']):
+            basename = os.path.basename(path)
+            if len(basename) > 3:
+                should.append({"match": {"file.path": basename}})
+        else:
+            # 仍保留对精确 file.path 和 file.name 的匹配（原有逻辑）
+            if path and path not in ["", "unknown"]:
+                should.append({"term": {"file.path": path}})
+                should.append({"match": {"file.name": os.path.basename(path)}})
+
+        # 网络/IP 关联
         ip = self._get_val(anchor, 'source.ip')
         if ip: should.append({"term": {"source.ip": ip}})
-        
+
         if not should: return []
-        
+
         try:
-            # 修复点：使用 ignore_unavailable
-            res = self.es.search(
-                index="unified-logs*,network-flows*,honeypot-logs*", 
-                body={"query": {"bool": {"must": must, "should": should, "minimum_should_match": 1}}, "size": 50},
-                ignore_unavailable=True
-            )
+            query = {"bool": {"must": must, "should": should, "minimum_should_match": 1}}
+            res = self.es.search(index="unified-logs*,network-flows*,honeypot-logs*", body={"query": query, "size": 100}, ignore_unavailable=True)
             return [h['_source'] for h in res['hits']['hits']]
         except Exception:
             return []

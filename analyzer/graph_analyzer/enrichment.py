@@ -783,10 +783,15 @@ class IntelEnricher:
                 recall = len(intersection) / len(observed_set)
             else:
                 recall = 0.0
-            
+
             # 综合得分（偏重召回率，因为我们观测的 TTP 可能只是攻击的一部分）
             score = 0.3 * jaccard + 0.7 * recall
-            
+
+            # 关键技术权重提升（针对 C2 / Exfil / 网络通道等重要 TTP）
+            # 对交集包含关键 TTP 的组织适度提升分数（上限 1.0）
+            if any(t in intersection for t in ("T1071", "T1041", "T1567")):
+                score = min(score * 1.1, 1.0)
+
             if score > 0.1:  # 过滤太低的
                 # 构建一个伪 APTProfile 用于结果
                 profile = APTProfile(
@@ -908,6 +913,24 @@ class IntelEnricher:
     def get_apt_profile(self, name: str) -> Optional[APTProfile]:
         """获取指定 APT 组织的画像"""
         return self.apt_db.get(name)
+
+    @property
+    def apt_db(self) -> Dict[str, APTProfile]:
+        """合并视图：返回所有可用的 APT 剧本集合（本地 + 内置 MITRE 简化 + 真实 MITRE 加载）
+
+        这个属性用于兼容历史接口（如 `self.apt_db` 的直接访问）。
+        """
+        db: Dict[str, APTProfile] = {}
+        # 本地自定义优先
+        if hasattr(self, 'local_apt_db') and isinstance(self.local_apt_db, dict):
+            db.update(self.local_apt_db)
+        # 内置的简化 MITRE 剧本
+        if hasattr(self, 'mitre_apt_db') and isinstance(self.mitre_apt_db, dict):
+            db.update(self.mitre_apt_db)
+        # 从真实 MITRE 加载的画像（覆盖同名条目）
+        if hasattr(self, '_mitre_apt_profiles') and isinstance(self._mitre_apt_profiles, dict):
+            db.update(self._mitre_apt_profiles)
+        return db
     
     def add_local_apt_profile(self, profile: APTProfile) -> None:
         """
@@ -1196,3 +1219,48 @@ class IntelEnricher:
                 for m in matches[:top_n]
             ]
         }
+
+
+# =========================================================================
+# 补充：AtlasMapper（内存/行为标签映射辅助类）
+# =========================================================================
+class AtlasMapper:
+    def __init__(self):
+        # 预定义内存异常映射到 ATLAS 风格标签
+        self.memory_anomaly_labels = {
+            'MEMFD_EXEC': 'FILELESS_ATTACK',
+            'ANON_ELF': 'FILELESS_ATTACK',
+            'RWX_REGION': 'CODE_INJECTION',
+            'STACK_EXEC': 'CODE_INJECTION',
+            'PROCESS_HOLLOWING': 'PROCESS_HOLLOWING'
+        }
+
+    def get_label(self, event: Dict[str, Any]) -> str:
+        """结合事件类型、路径、命令行生成简化的 ATLAS 标签
+
+        逻辑：
+        - 优先识别内存异常（映射到文件无痕/代码注入等）
+        - 再基于命令行简单规则识别下载并执行行为
+        - 返回事件类别的大写形式或 'UNKNOWN'
+        """
+        category = (event.get('event') or {}).get('category', '')
+
+        # 1. 优先处理内存异常
+        if category == 'memory':
+            anomalies = (event.get('memory') or {}).get('anomalies', [])
+            for a in anomalies if isinstance(anomalies, list) else [anomalies]:
+                if not isinstance(a, dict):
+                    continue
+                a_type = a.get('type')
+                if a_type in self.memory_anomaly_labels:
+                    return self.memory_anomaly_labels[a_type]
+
+        # 2. 命令行与路径匹配（简化规则）
+        cmd = (event.get('process') or {}).get('command_line', '') or ''
+        if isinstance(cmd, str) and 'curl' in cmd and '|' in cmd and 'bash' in cmd:
+            return 'DOWNLOAD_AND_EXECUTE'
+
+        # 3. 返回类别大写或 UNKNOWN
+        if category:
+            return category.upper()
+        return 'UNKNOWN'
