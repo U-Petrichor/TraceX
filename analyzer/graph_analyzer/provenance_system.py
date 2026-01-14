@@ -54,5 +54,6 @@ class ProvenanceSystem:
             "nodes": graph_data.get('nodes', []),
             "edges": graph_data.get('edges', []),
             "path_signature": signature,
-            "intelligence": {"attribution": self.enricher.attribute_by_ttps(labels)}
+            "intelligence": {"attribution": self.enricher.attribute_by_ttps(labels)},
+            "stats": {"events_processed": len(all_events)}
         }
