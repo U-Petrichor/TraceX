@@ -33,6 +33,27 @@ class GraphBuilder:
 
     def _md5(self, s: str): return hashlib.md5(s.encode()).hexdigest()
 
+    # =========================================================================
+    # [FIX] 补全公有接口：generate_node_id（支持 process/file/其它类型）
+    # =========================================================================
+    def generate_node_id(self, e: Any) -> str:
+        host = self._get_val(e, 'host.name', 'unknown')
+        category = self._get_val(e, 'event.category', '')
+
+        if category == 'process':
+            pid = self._get_val(e, 'process.pid', 0)
+            exe = self._get_val(e, 'process.executable', '')
+            ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
+            st = self.pid_cache.get_start_time(host, pid) or self._get_val(e, 'process.start_time') or ts
+            return self._md5(f"{host}|{pid}|{exe}|{st}")
+
+        if category == 'file':
+            path = self._get_val(e, 'file.path', 'unknown')
+            ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
+            return self._md5(f"{host}|{path}|{ts}")
+
+        return self._md5(str(self._get_val(e, 'event.id', 'unknown')))
+
     def build_from_events(self, events: List[Any]):
         for e in events: self._process_event(e)
         return {"nodes": [n.__dict__ for n in self._nodes.values()], "edges": [e.__dict__ for e in self._edges]}
@@ -44,20 +65,8 @@ class GraphBuilder:
         ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
         category = self._get_val(e, 'event.category', '')
 
-        # 1. 唯一 Node ID 生成 (基于 PID 上下文缓存)
-        st = self.pid_cache.get_start_time(host, pid)
-        if not st:
-            # 仅在进程启动事件时设置初始缓存，其余情况使用逻辑兜底
-            if category == "process" and self._get_val(e, 'event.action') in ["exec", "process_started"]:
-                st = ts
-                try:
-                    self.pid_cache.set_start_time(host, pid, st)
-                except Exception:
-                    pass
-            else:
-                st = "logical_anchor" # v6.1 规格：严禁直接用 ts 以防断链
-
-        node_id = self._md5(f"{host}|{pid}|{exe}|{st}")
+        # 1. 统一使用公开接口生成 node_id
+        node_id = self.generate_node_id(e)
 
         # 2. [v6.1] 语义信息提取 (AtlasMapper 可能返回 label 或 (label,severity,ttp))
         semantic_info = self.atlas_mapper.get_label(e)
@@ -98,11 +107,12 @@ class GraphBuilder:
                 }
             )
 
-        # 4. 父进程回溯 (原有功能)
+        # 5. [FIX] 父进程回溯并对齐 ID 生成逻辑（尝试使用 parent.executable 保持与父事件一致）
         ppid = self._get_val(e, 'process.parent.pid', 0)
         if ppid > 0:
-            pst = self.pid_cache.get_start_time(host, ppid) or "unknown"
-            parent_id = self._md5(f"{host}|{ppid}||{pst}")
+            pst = self.pid_cache.get_start_time(host, ppid) or self._get_val(e, 'process.parent.start_time') or "unknown"
+            pexe = self._get_val(e, 'process.parent.executable', '') or self._get_val(e, 'process.parent.path', '')
+            parent_id = self._md5(f"{host}|{ppid}|{pexe}|{pst}")
             if parent_id not in self._nodes:
                 self._nodes[parent_id] = GraphNode(id=parent_id, type='process', label=f"Parent:{ppid}")
             self._edges.append(GraphEdge(source=parent_id, target=node_id, relation='spawned', timestamp=ts))
