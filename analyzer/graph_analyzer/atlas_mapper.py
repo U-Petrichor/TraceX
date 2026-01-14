@@ -1,30 +1,13 @@
 # analyzer/graph_analyzer/atlas_mapper.py
 """
-ATLAS 语义标签映射器 v5.1
+ATLAS 语义标签映射器 v5.4 (Fixed Priority)
 
 功能：
   将底层事件抽象为高层语义标签。这是 ATLAS 图抽象的核心步骤。
-  
-  例如：
-    /tmp/shell.txt     -> TEMP_FILE_ACCESS
-    /var/www/html/*.php -> WEB_ROOT_ACCESS + PHP_SCRIPT
-    curl http://evil.com -> SUSPICIOUS_DOWNLOADER
-  
-  这些标签将用于：
-    1. 构建攻击路径签名（path_signature）
-    2. 与已知 APT 剧本进行相似度匹配
-    3. 可视化时的节点分类
 
-规则优先级：
-  1. 进程可执行文件路径
-  2. 文件路径
-  3. 命令行参数
-  4. 网络特征
-  5. 事件类别（兜底）
-
-使用示例：
-    mapper = AtlasMapper()
-    label = mapper.get_label(event)  # -> "SUSPICIOUS_DOWNLOADER"
+修订记录：
+  - v5.4: 调整通用匹配优先级，CmdLine > Executable，确保 'curl | bash' 识别为 'DOWNLOAD_AND_EXECUTE' 而非 'SUSPICIOUS_DOWNLOADER'
+  - v5.3: 修复 get_all_labels 同步问题
 """
 import re
 import logging
@@ -113,16 +96,18 @@ class AtlasMapper:
             (r'nc\s+-e', 'REVERSE_SHELL', '反弹 Shell'),
             (r'ncat\s+-e', 'REVERSE_SHELL', '反弹 Shell'),
             
-            # Base64 编码执行
-            (r'base64\s+-d', 'ENCODED_EXECUTION', '编码执行'),
-            (r'\|\s*bash', 'PIPE_TO_SHELL', '管道到 Shell'),
-            (r'\|\s*sh', 'PIPE_TO_SHELL', '管道到 Shell'),
-            
-            # 下载执行
+            # 下载执行 (必须在通用管道之前)
             (r'curl.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', '下载并执行'),
             (r'wget.*\|\s*bash', 'DOWNLOAD_AND_EXECUTE', '下载并执行'),
             (r'curl.*-o\s+/tmp/', 'DOWNLOAD_TO_TEMP', '下载到临时目录'),
             (r'wget.*-O\s+/tmp/', 'DOWNLOAD_TO_TEMP', '下载到临时目录'),
+            
+            # Base64 编码执行
+            (r'base64\s+-d', 'ENCODED_EXECUTION', '编码执行'),
+            
+            # 通用管道 (优先级较低)
+            (r'\|\s*bash', 'PIPE_TO_SHELL', '管道到 Shell'),
+            (r'\|\s*sh', 'PIPE_TO_SHELL', '管道到 Shell'),
         ]
         
         # === 网络事件规则 ===
@@ -189,18 +174,7 @@ class AtlasMapper:
     
     def get_label(self, event: Any) -> str:
         """
-        为事件生成 ATLAS 语义标签
-        
-        优先级规则（v5.1 修复）：
-        1. 文件事件 -> 优先匹配文件路径规则
-        2. 网络事件 -> 优先匹配网络/方向规则
-        3. 进程事件 -> 优先匹配进程规则
-        
-        Args:
-            event: UnifiedEvent 对象或字典
-            
-        Returns:
-            语义标签字符串
+        为事件生成 ATLAS 语义标签 (返回主标签)
         """
         labels = []
         category = self._get_val(event, 'event.category', '')
@@ -215,20 +189,20 @@ class AtlasMapper:
         protocol = self._get_val(event, 'network.protocol', '')
         direction = self._get_val(event, 'network.direction', '')
         
-        # === 特殊高优先级规则 (覆盖通用规则) ===
+        # === 特殊高优先级规则 ===
         
-        # 敏感文件访问 - 无论什么进程，都标记为 SENSITIVE_FILE
-        sensitive_files = ['/etc/passwd', '/etc/shadow', '/etc/sudoers', '.ssh/', '.bash_history']
+        # 敏感文件访问
+        sensitive_files = ['/etc/passwd', '/etc/shadow', '/etc/sudoers']
         if any(sf in str(file_path) or sf in str(cmd_line) for sf in sensitive_files):
             return 'SENSITIVE_FILE'
         
-        # WebShell 写入 - 在 Web 目录写入脚本文件
+        # WebShell 写入
         webshell_paths = ['/var/www', 'htdocs', 'wwwroot', 'public_html']
         webshell_exts = ['php', 'jsp', 'asp', 'aspx']
         if any(wp in str(file_path) for wp in webshell_paths):
             if str(file_ext).lower() in webshell_exts or '.php' in str(file_path):
                 if action in ['create', 'write', 'moved-to', 'rename']:
-                    return 'PHP_SCRIPT'  # 或者根据扩展名返回具体类型
+                    return 'PHP_SCRIPT'
                 return 'WEB_ROOT_ACCESS'
         
         # 临时文件访问
@@ -238,53 +212,45 @@ class AtlasMapper:
         # === 根据事件类别决定匹配优先级 ===
         
         if category == 'network':
-            # 网络事件：优先返回网络方向标签
             if direction:
                 if direction.lower() in ['inbound', 'ingress']:
                     return 'NETWORK_Inbound'
                 elif direction.lower() in ['outbound', 'egress']:
                     return 'NETWORK_Outbound'
-            
-            # 然后匹配协议
             if protocol:
                 match = self._match_patterns(protocol, self._net_compiled)
                 if match:
                     labels.append(match[0])
         
         elif category == 'file':
-            # 文件事件：优先匹配文件路径
             if file_path:
                 match = self._match_patterns(file_path, self._file_compiled)
                 if match:
                     labels.append(match[0])
         
-        elif category in ['process', 'authentication']:
-            # 进程/认证事件：按原有逻辑
-            pass
-        
         # === 通用匹配逻辑 ===
         
-        # 1. 检查可执行文件路径
+        # [Fix Priority] 1. 优先检查命令行 (行为特征比工具名称更具体)
+        if not labels and cmd_line:
+            match = self._match_patterns(cmd_line, self._cmd_compiled)
+            if match:
+                labels.append(match[0])
+
+        # 2. 检查可执行文件路径
         if not labels and executable:
             match = self._match_patterns(executable, self._exe_compiled)
             if match:
                 labels.append(match[0])
         
-        # 2. 检查进程名（作为可执行文件的补充）
+        # 3. 检查进程名
         if not labels and proc_name:
             match = self._match_patterns(f"/{proc_name}", self._exe_compiled)
             if match:
                 labels.append(match[0])
         
-        # 3. 检查文件路径
+        # 4. 检查文件路径
         if not labels and file_path:
             match = self._match_patterns(file_path, self._file_compiled)
-            if match:
-                labels.append(match[0])
-        
-        # 4. 检查命令行
-        if not labels and cmd_line:
-            match = self._match_patterns(cmd_line, self._cmd_compiled)
             if match:
                 labels.append(match[0])
         
@@ -294,25 +260,21 @@ class AtlasMapper:
             if match:
                 labels.append(match[0])
         
-        # 6. 网络方向（如果有）
+        # 6. 网络方向推断
         if direction:
             if direction.lower() in ['inbound', 'ingress']:
                 labels.append('NETWORK_Inbound')
             elif direction.lower() in ['outbound', 'egress']:
                 labels.append('NETWORK_Outbound')
-        elif protocol:
-            # 推断方向：curl/wget 通常是出站
+        elif protocol or category == 'network':
             if proc_name in ['curl', 'wget', 'fetch']:
                 labels.append('NETWORK_Outbound')
-            # nginx/apache 通常是入站
             elif proc_name in ['nginx', 'apache', 'httpd']:
                 labels.append('NETWORK_Inbound')
         
-        # 7. 如果没有匹配任何规则，使用事件类别作为兜底
         if not labels:
             category = self._get_val(event, 'event.category', 'UNKNOWN')
             action = self._get_val(event, 'event.action', '')
-            
             if category:
                 fallback = category.upper()
                 if action:
@@ -321,48 +283,48 @@ class AtlasMapper:
             else:
                 labels.append('UNKNOWN')
         
-        # 返回主标签（第一个匹配的）
-        # 如果需要所有标签，可以返回 "|".join(labels)
         return labels[0] if labels else 'UNKNOWN'
     
     def get_all_labels(self, event: Any) -> List[str]:
         """
-        获取事件的所有匹配标签
-        
-        Args:
-            event: UnifiedEvent 对象或字典
-            
-        Returns:
-            标签列表
+        获取事件的所有匹配标签 (包含所有可能的匹配，不短路)
         """
         labels = []
         
-        # 执行完整匹配
         executable = self._get_val(event, 'process.executable')
+        file_path = self._get_val(event, 'file.path')
+        cmd_line = self._get_val(event, 'process.command_line')
+        protocol = self._get_val(event, 'network.protocol')
+        proc_name = self._get_val(event, 'process.name')
+        direction = self._get_val(event, 'network.direction')
+        
         if executable:
             match = self._match_patterns(executable, self._exe_compiled)
-            if match:
-                labels.append(match[0])
+            if match: labels.append(match[0])
         
-        file_path = self._get_val(event, 'file.path')
         if file_path:
             match = self._match_patterns(file_path, self._file_compiled)
-            if match:
-                labels.append(match[0])
+            if match: labels.append(match[0])
         
-        cmd_line = self._get_val(event, 'process.command_line')
         if cmd_line:
             match = self._match_patterns(cmd_line, self._cmd_compiled)
-            if match:
-                labels.append(match[0])
+            if match: labels.append(match[0])
         
-        protocol = self._get_val(event, 'network.protocol')
         if protocol:
             match = self._match_patterns(protocol, self._net_compiled)
-            if match:
-                labels.append(match[0])
+            if match: labels.append(match[0])
+            
+        if direction:
+            if direction.lower() in ['inbound', 'ingress']:
+                labels.append('NETWORK_Inbound')
+            elif direction.lower() in ['outbound', 'egress']:
+                labels.append('NETWORK_Outbound')
+        else:
+            if proc_name in ['curl', 'wget', 'fetch']:
+                labels.append('NETWORK_Outbound')
+            elif proc_name in ['nginx', 'apache', 'httpd']:
+                labels.append('NETWORK_Inbound')
         
-        # 去重并保持顺序
         seen = set()
         unique_labels = []
         for label in labels:
