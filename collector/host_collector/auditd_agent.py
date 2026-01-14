@@ -42,6 +42,16 @@ ES_HOST = "http://localhost:9200"
 MEM_SCANNER_BIN = os.path.join(current_dir, "mem_scanner/bin/scanner")
 if platform.system() == 'Windows':
     MEM_SCANNER_BIN = "" # Disabled on Windows
+
+# === Index Naming Helper ===
+def get_current_index_name():
+    """
+    Generate index name based on Beijing Time (UTC+8).
+    Format: unified-logs-YYYY.MM.DD
+    Matches TraceX v5.1 standard.
+    """
+    beijing_time = datetime.utcnow() + timedelta(hours=8)
+    return f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
     
 # === Behavior Analysis & Memory Monitoring ===
 class BehaviorAnalyzer:
@@ -100,7 +110,6 @@ class BehaviorAnalyzer:
         for seq in self.sequences:
             required = seq["events"]
             # Simple check: do all required events exist in recent history in order?
-            # This is a simplified subsequence check
             last_idx = -1
             found_count = 0
             for req_evt in required:
@@ -167,7 +176,6 @@ class BehaviorAnalyzer:
         raw_anomalies = data.get("anomalies", [])
         
         # Filter anomalies: Only keep HIGH or CRITICAL
-        # This reduces noise from system processes (LOW/MEDIUM)
         anomalies = [
             a for a in raw_anomalies 
             if a.get("risk_level") in ["HIGH", "CRITICAL"]
@@ -176,23 +184,13 @@ class BehaviorAnalyzer:
         if not anomalies:
             return
 
-        # Create a deterministic signature of the current anomalies
-        # We sort keys to ensure consistent JSON string
         try:
             sig_str = json.dumps(anomalies, sort_keys=True)
             signature = hashlib.md5(sig_str.encode('utf-8')).hexdigest()
         except:
-            # Fallback if json fails (unlikely)
             signature = str(anomalies)
 
-        # Alert Deduplication (Throttling)
-        # Logic: 
-        # 1. If Same PID + Same Signature + Within 5 minutes -> SILENCE
-        # 2. If Different Signature (Attack changed) -> ALERT IMMEDIATELY
-        # 3. If > 5 minutes -> ALERT AGAIN (Reminder)
-        
         now = time.time()
-        # history stores: {pid: (timestamp, signature)}
         last_alert_time, last_signature = self.alert_history.get(pid, (0, ""))
         
         if signature == last_signature and (now - last_alert_time < 300):
@@ -228,7 +226,6 @@ class BehaviorAnalyzer:
 
     def run_periodic_scan(self):
         """Run full scan periodically if load is low"""
-        # Initial short delay to allow agent to start up
         time.sleep(2)
         
         while True:
@@ -239,10 +236,10 @@ class BehaviorAnalyzer:
             # Smart Load Check
             try:
                 if psutil.cpu_percent() > 80.0:
-                    time.sleep(300) # Wait another 5 mins if busy
+                    time.sleep(300) 
                     continue
             except ImportError:
-                pass # psutil missing, ignore check
+                pass 
                 
             try:
                 # Run full scan
@@ -250,7 +247,7 @@ class BehaviorAnalyzer:
                     [MEM_SCANNER_BIN, "--scan-all"],
                     capture_output=True,
                     text=True,
-                    timeout=60 # Full scan might take longer
+                    timeout=60
                 )
                 
                 if result.returncode == 0 and result.stdout.strip():
@@ -264,10 +261,7 @@ class BehaviorAnalyzer:
             except Exception as e:
                 print(f"[-] Periodic scan error: {e}")
             
-            # Sleep interval
             time.sleep(300)
-
-
 
 # === State & Lock Management ===
 def load_state():
@@ -346,11 +340,6 @@ def get_inode(filepath):
     except FileNotFoundError:
         return None
 
-def get_current_index_name():
-    """Generate index name based on Beijing Time (UTC+8)"""
-    beijing_time = datetime.utcnow() + timedelta(hours=8)
-    return f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
-
 # === Main Logic ===
 def main():
     if hasattr(os, 'geteuid') and os.geteuid() != 0:
@@ -368,11 +357,6 @@ def main():
     saved_inode, saved_offset = acquire_lock()
     parser = HostLogParser()
     
-    # Index naming (Beijing Time)
-    from datetime import timedelta
-    beijing_time = datetime.utcnow() + timedelta(hours=8)
-    index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
-
     while not os.path.exists(LOG_FILE):
         time.sleep(2)
 
@@ -391,13 +375,14 @@ def main():
     NOISE_PROCS = {'sleep', 'date', 'uptime', 'awk', 'sed', 'head', 'tail', 'cut', 'tr'}
 
     # === Initialize Behavior Analyzer ===
-    # Use dynamic index name for rotation
     analyzer = BehaviorAnalyzer(es, get_current_index_name)
     threading.Thread(target=analyzer.run_periodic_scan, daemon=True).start()
+    
+    print(f"[+] Auditd Agent Started. Index target: {get_current_index_name()}")
 
     try:
         while True:
-            # Refresh index name periodically (for main loop)
+            # [FIX] Get dynamic index name inside the loop to ensure rotation and correct naming
             current_index_name = get_current_index_name()
             
             line = file_obj.readline()
@@ -442,22 +427,14 @@ def main():
                     user_name = user.get('name', '')
                     
                     # === Behavior Hook ===
-                    # Extract PID and Syscall for analysis
                     try:
                         pid = int(process.get('pid', 0))
                         syscall = ""
-                        # Try to extract syscall from action or raw log if available
-                        # Action usually maps to syscall for SYSCALL events
                         if doc.get('event', {}).get('category') == 'process':
-                            # Infer from action or raw event
-                            # Simplified mapping:
                             if action == 'process_started': syscall = 'execve'
-                            elif 'ptrace' in line_str: syscall = 'ptrace' # Fallback to raw check
+                            elif 'ptrace' in line_str: syscall = 'ptrace'
                             elif 'memfd_create' in line_str: syscall = 'memfd_create'
                             elif 'mprotect' in line_str: syscall = 'mprotect'
-                        
-                        # Direct SYSCALL parsing from parser output if available
-                        # (assuming parser enriches this info in future, for now fallback to string match)
                         
                         if pid > 0 and syscall:
                             analyzer.record_event(pid, syscall)
@@ -465,7 +442,6 @@ def main():
                         pass
                     
                     # 1. Drop process_started without cmd_line
-
                     if action == 'process_started' and not cmd_line:
                         continue
 
@@ -473,13 +449,7 @@ def main():
                     should_ingest = True
                     if proc_name in NOISE_PROCS:
                         should_ingest = False
-                        
-                        # Exception A: Sleep > 60s
                         if proc_name == 'sleep':
-                            # check args or command_line
-                            # simple heuristic: check command_line for large numbers?
-                            # or strictly parse args if available. 
-                            # cmd_line ex: "sleep 100"
                             try:
                                 parts = cmd_line.split()
                                 for p in parts:
@@ -488,32 +458,16 @@ def main():
                                         break
                             except:
                                 pass
-                        
-                        # Exception B: Web User
                         if user_name in ['www-data', 'apache']:
                             should_ingest = True
-                            
-                        # Exception C: Root user running non-preset command
-                        # (If we are here, it IS a preset/noise command. So this rule doesn't save it
-                        # unless the rule means "If Root runs it, we keep it"? 
-                        # The user text: "或者是 Root 用户执行的非系统预设命令" -> "OR Root executing non-preset".
-                        # This implies if Root executes "sleep" (preset), we DO NOT keep it.
-                        # So this exception does not apply inside the "if proc_name in NOISE_PROCS" block.
-                        # It applies to the general case (which is already True).
-                        # So we don't need to do anything here for Root.
                         pass
 
                     if should_ingest:
                         # === Alignment Logic (Group 1) ===
-                        # 1. Hostname Enforce
                         if 'host' not in doc: doc['host'] = {}
                         doc['host']['name'] = socket.gethostname()
                         
-                        # 2. Severity Enforce (Int 1-10)
-                        # Default from parser is 1 (Success) or 4 (Failure)
                         current_severity = doc.get('event', {}).get('severity', 1)
-                        
-                        # High Risk Rules
                         is_sensitive = any(s in cmd_line for s in ['/etc/passwd', '/etc/shadow', '.ssh', 'authorized_keys'])
                         is_root_active = (str(doc.get('user', {}).get('id')) == '0') and (action != 'process_started')
                         
@@ -526,19 +480,16 @@ def main():
                         doc['event']['severity'] = int(current_severity)
 
                         try:
-                            es.index(index=index_name, document=doc)
+                            # [FIX] Use the dynamic index name here
+                            es.index(index=current_index_name, document=doc)
                         except:
                             pass
             else:
-                # Raw logs are noise in Production? Usually yes, unless critical.
-                # User didn't specify, but "Smart Agent" usually implies "Only Parsed".
-                # But to be safe, I'll ingest raw if it looks important? 
-                # The user said "Smart Filtering... Drop... Noise Filter". 
-                # It didn't say "Drop Raw". 
-                # I will keep Raw for now to avoid data loss of unknown formats.
+                # Ingest Raw Logs
                 raw_doc = make_raw_doc(line_str)
                 try:
-                    es.index(index=index_name, document=raw_doc)
+                    # [FIX] Use the dynamic index name here
+                    es.index(index=current_index_name, document=raw_doc)
                 except:
                     pass
 
