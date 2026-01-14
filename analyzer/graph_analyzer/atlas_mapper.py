@@ -1,11 +1,12 @@
 # analyzer/graph_analyzer/atlas_mapper.py
 """
-ATLAS 语义标签映射器 v5.4 (Fixed Priority)
+ATLAS 语义标签映射器 v5.5 (新增内存异常标签支持)
 
 功能：
   将底层事件抽象为高层语义标签。这是 ATLAS 图抽象的核心步骤。
 
 修订记录：
+  - v5.5: 新增内存异常事件的语义标签映射（MEMFD_EXEC, CODE_INJECTION 等）
   - v5.4: 调整通用匹配优先级，CmdLine > Executable，确保 'curl | bash' 识别为 'DOWNLOAD_AND_EXECUTE' 而非 'SUSPICIOUS_DOWNLOADER'
   - v5.3: 修复 get_all_labels 同步问题
 """
@@ -126,6 +127,26 @@ class AtlasMapper:
             (r'^icmp$', 'ICMP_TRAFFIC', 'ICMP 流量'),
         ]
         
+        # === v5.5 新增：内存异常类型映射 ===
+        # 将内存异常类型映射到语义标签
+        self.memory_anomaly_labels: dict = {
+            # 无文件攻击相关
+            'MEMFD_EXEC': ('FILELESS_ATTACK', '无文件攻击（memfd 执行）'),
+            'ANON_ELF': ('FILELESS_ATTACK', '无文件攻击（匿名 ELF）'),
+            
+            # 代码注入相关
+            'RWX_REGION': ('CODE_INJECTION', '代码注入（RWX 内存区域）'),
+            'STACK_EXEC': ('CODE_INJECTION', '代码注入（栈执行）'),
+            'HEAP_EXEC': ('CODE_INJECTION', '代码注入（堆执行）'),
+            
+            # 进程空洞/反射加载
+            'PROCESS_HOLLOWING': ('PROCESS_HOLLOWING', '进程空洞攻击'),
+            'REFLECTIVE_LOAD': ('REFLECTIVE_LOADING', '反射式 DLL 加载'),
+            
+            # 通用异常
+            'SUSPICIOUS_MEMORY': ('MEMORY_ANOMALY', '可疑内存区域'),
+        }
+        
         # 编译正则表达式（提高性能）
         self._compile_patterns()
     
@@ -179,6 +200,10 @@ class AtlasMapper:
         labels = []
         category = self._get_val(event, 'event.category', '')
         action = self._get_val(event, 'event.action', '')
+        
+        # === v5.5 新增：内存异常事件优先处理 ===
+        if category == 'memory':
+            return self._get_memory_label(event)
         
         # 获取各种字段
         file_path = self._get_val(event, 'file.path', '')
@@ -333,3 +358,44 @@ class AtlasMapper:
                 unique_labels.append(label)
         
         return unique_labels if unique_labels else ['UNKNOWN']
+    
+    def _get_memory_label(self, event: Any) -> str:
+        """
+        为内存异常事件生成语义标签 (v5.5 新增)
+        
+        根据异常类型和风险等级映射到对应的语义标签。
+        """
+        anomalies = self._get_val(event, 'memory.anomalies', [])
+        
+        # 兼容单个异常的情况
+        if isinstance(anomalies, dict):
+            anomalies = [anomalies]
+        
+        if not anomalies:
+            return 'MEMORY_ANOMALY'
+        
+        # 按风险等级排序，优先返回最高风险的标签
+        risk_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+        sorted_anomalies = sorted(
+            anomalies,
+            key=lambda x: risk_order.get(str(x.get('risk_level', '')).upper(), 4) if isinstance(x, dict) else 4
+        )
+        
+        # 获取最高风险异常的类型
+        for anomaly in sorted_anomalies:
+            if isinstance(anomaly, dict):
+                anomaly_type = anomaly.get('type', '')
+                risk_level = str(anomaly.get('risk_level', '')).upper()
+                
+                # 尝试从映射表获取标签
+                if anomaly_type in self.memory_anomaly_labels:
+                    label, _ = self.memory_anomaly_labels[anomaly_type]
+                    return label
+                
+                # 根据风险等级返回通用标签
+                if risk_level == 'CRITICAL':
+                    return 'CRITICAL_MEMORY_ANOMALY'
+                elif risk_level == 'HIGH':
+                    return 'HIGH_RISK_MEMORY_ANOMALY'
+        
+        return 'MEMORY_ANOMALY'

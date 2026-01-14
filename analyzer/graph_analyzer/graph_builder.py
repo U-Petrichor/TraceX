@@ -1,17 +1,19 @@
 # analyzer/graph_analyzer/graph_builder.py
 """
-图构建器 v5.1 (含完整节点ID生成逻辑)
+图构建器 v5.2 (新增内存异常事件支持)
 
 功能：
   1. 生成唯一的节点 ID
      - Process: host + pid + executable + start_time
      - Network: host + src_ip + dst_port + event_id
      - File: host + path + action + timestamp (修复：加入时序区分)
+     - Memory: host + pid + anomaly_type + event_id (v5.2 新增)
   
   2. 构建实体之间的关系（边）
      - spawned: 进程创建子进程
      - accessed/created/deleted: 进程操作文件
      - connected_to: 网络连接
+     - triggered_anomaly: 进程触发内存异常 (v5.2 新增)
 
 核心设计：
   - 使用 PIDCache 解决 Linux PID 复用问题
@@ -135,6 +137,9 @@ class GraphBuilder:
             return self._generate_file_node_id(event, host_name)
         elif category == 'authentication':
             return self._generate_auth_node_id(event, host_name)
+        elif category == 'memory':
+            # v5.2 新增：内存异常事件
+            return self._generate_memory_node_id(event, host_name)
         else:
             # 兜底：使用 event.id
             event_id = self._get_val(event, 'event.id', '')
@@ -220,6 +225,27 @@ class GraphBuilder:
         event_id = self._get_val(event, 'event.id', '')
         
         uniq_str = f"{host_name}|auth|{src_ip}|{user_name}|{session_id}|{event_id}"
+        return self._md5_hash(uniq_str)
+    
+    def _generate_memory_node_id(self, event: Any, host_name: str) -> str:
+        """
+        生成内存异常事件节点 ID (v5.2 新增)
+        
+        每个内存异常检测事件都是独立的，使用 event.id + pid + anomaly_type 确保唯一性。
+        """
+        pid = self._get_val(event, 'process.pid', 0)
+        event_id = self._get_val(event, 'event.id', '')
+        
+        # 获取主要异常类型（用于ID生成）
+        anomalies = self._get_val(event, 'memory.anomalies', [])
+        anomaly_type = ''
+        if anomalies:
+            if isinstance(anomalies, list) and len(anomalies) > 0:
+                anomaly_type = anomalies[0].get('type', '') if isinstance(anomalies[0], dict) else ''
+            elif isinstance(anomalies, dict):
+                anomaly_type = anomalies.get('type', '')
+        
+        uniq_str = f"{host_name}|memory|{pid}|{anomaly_type}|{event_id}"
         return self._md5_hash(uniq_str)
     
     # =========================================================================
@@ -326,6 +352,9 @@ class GraphBuilder:
             self._extract_file_entities(event, node_id, atlas_label, timestamp)
         elif category == 'authentication':
             self._extract_auth_entities(event, node_id, atlas_label, timestamp)
+        elif category == 'memory':
+            # v5.2 新增：内存异常事件处理
+            self._extract_memory_entities(event, node_id, atlas_label, timestamp)
         else:
             # 通用处理
             self._add_node(node_id, category, 
@@ -485,6 +514,95 @@ class GraphBuilder:
             
             relation = 'authenticated_as' if outcome == 'success' else 'failed_login_as'
             self._add_edge(node_id, user_id, relation, timestamp)
+    
+    def _extract_memory_entities(self, event: Any, node_id: str,
+                                 atlas_label: str, timestamp: str) -> None:
+        """
+        提取内存异常相关实体 (v5.2 新增)
+        
+        内存异常事件关键字段：
+        - memory.anomalies: 异常列表，每个异常包含 type, risk_level, address, perms 等
+        - process.pid: 触发异常的进程 PID
+        - process.executable: 进程可执行文件路径
+        
+        关系建模：
+        - 进程节点 -> 内存异常节点 (triggered_anomaly)
+        """
+        pid = self._get_val(event, 'process.pid', 0)
+        executable = self._get_val(event, 'process.executable', '')
+        host_name = self._get_val(event, 'host.name', '')
+        
+        # 获取内存异常信息
+        anomalies = self._get_val(event, 'memory.anomalies', [])
+        if isinstance(anomalies, dict):
+            anomalies = [anomalies]  # 兼容单个异常的情况
+        
+        # 提取主要异常信息用于节点属性
+        anomaly_types = []
+        risk_levels = []
+        anomaly_details = []
+        
+        for anomaly in anomalies:
+            if isinstance(anomaly, dict):
+                a_type = anomaly.get('type', 'UNKNOWN')
+                risk = anomaly.get('risk_level', '')
+                address = anomaly.get('address', '')
+                perms = anomaly.get('perms', '')
+                details = anomaly.get('details', '')
+                
+                anomaly_types.append(a_type)
+                if risk:
+                    risk_levels.append(risk)
+                anomaly_details.append({
+                    'type': a_type,
+                    'risk_level': risk,
+                    'address': address,
+                    'perms': perms,
+                    'details': details
+                })
+        
+        # 确定主要异常类型和风险等级
+        primary_type = anomaly_types[0] if anomaly_types else 'MEMORY_ANOMALY'
+        primary_risk = risk_levels[0] if risk_levels else 'UNKNOWN'
+        
+        # 创建内存异常节点
+        label = f"MemAnomaly:{primary_type}(PID:{pid})"
+        self._add_node(node_id, 'memory_anomaly', label=label, atlas_label=atlas_label,
+                       properties={
+                           "pid": pid,
+                           "executable": executable,
+                           "anomaly_types": anomaly_types,
+                           "risk_level": primary_risk,
+                           "anomaly_count": len(anomalies),
+                           "anomalies": anomaly_details,
+                           "host": host_name
+                       })
+        
+        # 建立与进程节点的关系
+        if pid and pid > 0:
+            # 获取或构造进程节点 ID
+            start_time = self.pid_cache.get_start_time(host_name, pid) or timestamp
+            proc_uniq = f"{host_name}|{pid}|{executable}|{start_time}"
+            proc_id = self._md5_hash(proc_uniq)
+            
+            # 创建进程节点（如果不存在）
+            proc_name = self._get_val(event, 'process.name', '')
+            proc_label = proc_name or executable or f"Process:{pid}"
+            self._add_node(proc_id, 'process', label=proc_label, 
+                          atlas_label="SUSPICIOUS_PROCESS",
+                          properties={
+                              "pid": pid, 
+                              "executable": executable, 
+                              "host": host_name,
+                              "has_memory_anomaly": True
+                          })
+            
+            # 进程 -> 内存异常（triggered_anomaly）
+            self._add_edge(proc_id, node_id, 'triggered_anomaly', timestamp,
+                          properties={
+                              "anomaly_type": primary_type,
+                              "risk_level": primary_risk
+                          })
     
     def _add_node(self, node_id: str, node_type: str, label: str,
                   atlas_label: str = "", properties: Optional[Dict] = None) -> None:
