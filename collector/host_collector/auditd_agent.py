@@ -161,6 +161,33 @@ class BehaviorAnalyzer:
             print(f"[-] Scan error for PID {pid}: {e}")
 
     def _ingest_scan_result(self, data, reason):
+        pid = data.get("pid")
+        anomalies = data.get("anomalies", [])
+        
+        # Create a deterministic signature of the current anomalies
+        # We sort keys to ensure consistent JSON string
+        try:
+            sig_str = json.dumps(anomalies, sort_keys=True)
+            signature = hashlib.md5(sig_str.encode('utf-8')).hexdigest()
+        except:
+            # Fallback if json fails (unlikely)
+            signature = str(anomalies)
+
+        # Alert Deduplication (Throttling)
+        # Logic: 
+        # 1. If Same PID + Same Signature + Within 5 minutes -> SILENCE
+        # 2. If Different Signature (Attack changed) -> ALERT IMMEDIATELY
+        # 3. If > 5 minutes -> ALERT AGAIN (Reminder)
+        
+        now = time.time()
+        # history stores: {pid: (timestamp, signature)}
+        last_alert_time, last_signature = self.alert_history.get(pid, (0, ""))
+        
+        if signature == last_signature and (now - last_alert_time < 300):
+            return
+
+        self.alert_history[pid] = (now, signature)
+
         # Convert to UnifiedEvent format
         doc = {
             "@timestamp": datetime.utcnow().isoformat() + "Z",
