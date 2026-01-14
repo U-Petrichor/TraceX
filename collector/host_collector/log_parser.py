@@ -1,4 +1,7 @@
 import re
+import json
+import socket
+import platform
 from datetime import datetime
 from collector.common.schema import UnifiedEvent
 
@@ -9,6 +12,7 @@ class HostLogParser:
         self._audit_buffer = {}
         self._last_audit_id = None
         # v4.1 Session Cache: {session_id: source_ip}
+        # 用于将登录时的源 IP 关联到后续的操作事件
         self._session_cache = {}
         self._cache_max_size = 1000
 
@@ -179,14 +183,32 @@ class HostLogParser:
         else:
             event.event.outcome = "success"; event.event.severity = 1
         if event.user.id == "0": event.event.severity = max(event.event.severity, 8)
+
+        # 3. 敏感目标判定：触碰敏感文件 -> Critical (10)
+        sensitive_patterns = ["/etc/passwd", "/etc/shadow", ".ssh", "/etc/sudoers"]
+        target_path = event.file.path or event.process.command_line or ""
         
-        import socket
-        event.host.name = socket.gethostname()
+        for pattern in sensitive_patterns:
+            if pattern in target_path:
+                event.event.severity = 10
+                event.detection.severity = "critical" # 同步更新旧字段
+                break
+        
+        # 填充主机信息
+        try:
+            event.host.hostname = socket.gethostname()
+            event.host.name = event.host.hostname
+            event.host.os.family = platform.system().lower()
+            event.host.os.name = platform.system()
+            event.host.os.version = platform.release()
+            event.host.ip = [socket.gethostbyname(event.host.hostname)]
+        except:
+            pass
+        
         event.event.dataset = "auditd"
         return event
 
 def write_event(event: UnifiedEvent, output_file: str = "output.json") -> bool:
-    import json
     try:
         data = event.to_dict()
         with open(output_file, "a", encoding="utf-8") as f:
