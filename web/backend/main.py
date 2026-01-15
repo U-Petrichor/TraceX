@@ -4,7 +4,10 @@ import logging
 from typing import List, Dict, Any, Optional
 
 # Add project root to path
-sys.path.append('/root')
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_file_dir))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
