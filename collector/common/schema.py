@@ -156,7 +156,7 @@ class MemoryInfo:
 @dataclass
 class EventInfo:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    category: str = ""  # process, network, file, authentication, host
+    category: str = ""  # process, network, file, authentication, memory, host
     type: str = ""      # start, end, info
     action: str = ""    # 具体动作
     outcome: str = ""   # success, failure, unknown

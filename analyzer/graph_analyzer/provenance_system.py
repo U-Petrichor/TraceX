@@ -49,11 +49,27 @@ class ProvenanceSystem:
         
         labels = [self.atlas_mapper.get_label(e) for e in all_events]
         signature = " -> ".join(sorted(set([l for l in labels if l != "UNKNOWN"])))
+
+        ttps = []
+        for e in all_events:
+            ttp_id = (
+                e.get("threat", {}).get("technique", {}).get("id")
+                if isinstance(e, dict)
+                else getattr(getattr(getattr(e, "threat", None), "technique", None), "id", None)
+            )
+            if ttp_id:
+                ttps.append(ttp_id)
         
+        ioc_enrichment = self.enricher.enrich_entities(graph_data.get("nodes", []))
+
         return {
             "nodes": graph_data.get('nodes', []),
             "edges": graph_data.get('edges', []),
             "path_signature": signature,
-            "intelligence": {"attribution": self.enricher.attribute_by_ttps(labels)},
+            "intelligence": {
+                "attribution_atlas": self.enricher.attribute_apt([l for l in labels if l != "UNKNOWN"]),
+                "attribution_ttp": self.enricher.attribute_by_ttps(list(set(ttps))),
+                "external_infrastructure": ioc_enrichment
+            },
             "stats": {"events_processed": len(all_events)}
         }

@@ -53,6 +53,22 @@ class GraphBuilder:
             ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
             return self._md5(f"{host}|{path}|{ts}")
 
+        if category == 'network':
+            src_ip = self._get_val(e, 'source.ip', '')
+            src_port = self._get_val(e, 'source.port', '')
+            dst_ip = self._get_val(e, 'destination.ip', '')
+            dst_port = self._get_val(e, 'destination.port', '')
+            proto = self._get_val(e, 'network.protocol', '')
+            ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
+            return self._md5(f"{host}|{src_ip}|{src_port}|{dst_ip}|{dst_port}|{proto}|{ts}")
+
+        if category == 'authentication':
+            user = self._get_val(e, 'user.name', '')
+            src_ip = self._get_val(e, 'source.ip', '')
+            outcome = self._get_val(e, 'event.outcome', '')
+            ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
+            return self._md5(f"{host}|{user}|{src_ip}|{outcome}|{ts}")
+
         return self._md5(str(self._get_val(e, 'event.id', 'unknown')))
 
     def build_from_events(self, events: List[Any]):
@@ -84,6 +100,7 @@ class GraphBuilder:
 
     def _process_event(self, e: Any):
         host = self._get_val(e, 'host.name', 'unknown')
+        host_node_id = self._ensure_host_node(e, host)
         pid = self._get_val(e, 'process.pid', 0)
         exe = self._get_val(e, 'process.executable', '')
         ts = self._get_val(e, 'timestamp', '') or self._get_val(e, '@timestamp', '')
@@ -113,9 +130,58 @@ class GraphBuilder:
                     ttp=ttp or 'T1055',
                     properties={'details': self._get_val(e, 'memory.anomalies')}
                 )
-            self._edges.append(GraphEdge(source=node_id, target=anomaly_id, relation='triggered_anomaly', timestamp=ts))
+            self._add_edge(node_id, anomaly_id, 'triggered_anomaly', ts)
 
-        # 4. 注册主进程节点（带语义注入）
+        # 4. 进程节点（仅当有进程信息时创建）
+        process_node_id = None
+        if pid or exe:
+            process_node_id = self._ensure_process_node(
+                e, host, pid, exe, ts,
+                atlas_label if category == "process" else "",
+                severity if category == "process" else 0,
+                ttp if category == "process" else ""
+            )
+
+        # 5. 父进程回溯：延迟处理父子关系以避免占位节点与后续父事件冲突
+        ppid = self._get_val(e, 'process.parent.pid', 0)
+        if ppid > 0 and process_node_id:
+            pst = self.pid_cache.get_start_time(host, ppid) or self._get_val(e, 'process.parent.start_time') or "unknown"
+            pexe = self._get_val(e, 'process.parent.executable', '') or self._get_val(e, 'process.parent.path', '')
+            # 延迟处理：收集必要信息，稍后在 build_from_events 统一解析
+            self._deferred_parent_links.append((host, ppid, pexe, pst, process_node_id, ts))
+
+        # 6. 文件节点与关系（允许基于字段存在性构造）
+        if category == "file" or self._has_file_data(e):
+            file_node_id = self._ensure_file_node(e, host, ts, atlas_label, severity, ttp)
+            if process_node_id and file_node_id:
+                relation = self._map_file_relation(self._get_val(e, 'event.action', ''))
+                self._add_edge(process_node_id, file_node_id, relation, ts)
+            elif host_node_id and file_node_id:
+                self._add_edge(host_node_id, file_node_id, 'host_file', ts)
+
+        # 7. 网络节点与关系（允许基于字段存在性构造）
+        if category == "network" or self._has_network_data(e):
+            network_node_id = self._ensure_network_node(e, host, ts, atlas_label, severity, ttp)
+            if process_node_id and network_node_id:
+                relation = self._map_network_relation(self._get_val(e, 'network.direction', ''))
+                self._add_edge(process_node_id, network_node_id, relation, ts)
+            elif host_node_id and network_node_id:
+                self._add_edge(host_node_id, network_node_id, 'host_network', ts)
+
+        # 8. 认证节点与关系（允许基于字段存在性构造）
+        if category == "authentication" or self._has_auth_data(e):
+            auth_node_id = self._ensure_auth_node(e, host, ts, atlas_label, severity, ttp)
+            if process_node_id and auth_node_id:
+                self._add_edge(process_node_id, auth_node_id, 'auth', ts)
+            elif host_node_id and auth_node_id:
+                self._add_edge(host_node_id, auth_node_id, 'host_auth', ts)
+
+    def _ensure_process_node(self, e: Any, host: str, pid: int, exe: str, ts: str,
+                             atlas_label: str, severity: int, ttp: str) -> Optional[str]:
+        if not (pid or exe):
+            return None
+        st = self.pid_cache.get_start_time(host, pid) or self._get_val(e, 'process.start_time') or ts
+        node_id = self._md5(f"{host}|{pid}|{exe}|{st}")
         if node_id not in self._nodes:
             self._nodes[node_id] = GraphNode(
                 id=node_id,
@@ -130,14 +196,155 @@ class GraphBuilder:
                     "host": host
                 }
             )
+        return node_id
 
-        # 5. 父进程回溯：延迟处理父子关系以避免占位节点与后续父事件冲突
-        ppid = self._get_val(e, 'process.parent.pid', 0)
-        if ppid > 0:
-            pst = self.pid_cache.get_start_time(host, ppid) or self._get_val(e, 'process.parent.start_time') or "unknown"
-            pexe = self._get_val(e, 'process.parent.executable', '') or self._get_val(e, 'process.parent.path', '')
-            # 延迟处理：收集必要信息，稍后在 build_from_events 统一解析
-            self._deferred_parent_links.append((host, ppid, pexe, pst, node_id, ts))
+    def _ensure_host_node(self, e: Any, host: str) -> Optional[str]:
+        if not host or host == "unknown":
+            return None
+        node_id = self._md5(f"host|{host}")
+        if node_id not in self._nodes:
+            self._nodes[node_id] = GraphNode(
+                id=node_id,
+                type='host',
+                label=host,
+                properties={
+                    "host": host,
+                    "hostname": self._get_val(e, 'host.hostname'),
+                    "ip": self._get_val(e, 'host.ip'),
+                    "os": self._get_val(e, 'host.os.name')
+                }
+            )
+        return node_id
+
+    def _ensure_file_node(self, e: Any, host: str, ts: str,
+                          atlas_label: str, severity: int, ttp: str) -> Optional[str]:
+        path = self._get_val(e, 'file.path', '')
+        if not path:
+            return None
+        node_id = self.generate_node_id(e)
+        if node_id not in self._nodes:
+            self._nodes[node_id] = GraphNode(
+                id=node_id,
+                type='file',
+                label=os.path.basename(path) if path else "unknown",
+                atlas_label=atlas_label,
+                severity=severity,
+                ttp=ttp,
+                properties={
+                    "path": path,
+                    "name": self._get_val(e, 'file.name'),
+                    "extension": self._get_val(e, 'file.extension'),
+                    "size": self._get_val(e, 'file.size', 0),
+                    "host": host
+                }
+            )
+        return node_id
+
+    def _ensure_network_node(self, e: Any, host: str, ts: str,
+                             atlas_label: str, severity: int, ttp: str) -> Optional[str]:
+        src_ip = self._get_val(e, 'source.ip', '')
+        dst_ip = self._get_val(e, 'destination.ip', '')
+        proto = self._get_val(e, 'network.protocol', '')
+        if not (src_ip or dst_ip or proto):
+            return None
+        node_id = self.generate_node_id(e)
+        label = self._build_network_label(e)
+        if node_id not in self._nodes:
+            self._nodes[node_id] = GraphNode(
+                id=node_id,
+                type='network',
+                label=label,
+                atlas_label=atlas_label,
+                severity=severity,
+                ttp=ttp,
+                properties={
+                    "source_ip": src_ip,
+                    "source_port": self._get_val(e, 'source.port'),
+                    "destination_ip": dst_ip,
+                    "destination_port": self._get_val(e, 'destination.port'),
+                    "protocol": proto,
+                    "direction": self._get_val(e, 'network.direction'),
+                    "host": host
+                }
+            )
+        return node_id
+
+    def _ensure_auth_node(self, e: Any, host: str, ts: str,
+                          atlas_label: str, severity: int, ttp: str) -> Optional[str]:
+        user = self._get_val(e, 'user.name', '')
+        src_ip = self._get_val(e, 'source.ip', '')
+        if not (user or src_ip):
+            return None
+        node_id = self.generate_node_id(e)
+        label = f"{user}@{src_ip}" if user and src_ip else (user or src_ip)
+        if node_id not in self._nodes:
+            self._nodes[node_id] = GraphNode(
+                id=node_id,
+                type='authentication',
+                label=label or "auth",
+                atlas_label=atlas_label,
+                severity=severity,
+                ttp=ttp,
+                properties={
+                    "user": user,
+                    "source_ip": src_ip,
+                    "outcome": self._get_val(e, 'event.outcome', ''),
+                    "host": host
+                }
+            )
+        return node_id
+
+    def _build_network_label(self, e: Any) -> str:
+        dst_ip = self._get_val(e, 'destination.ip', '')
+        dst_port = self._get_val(e, 'destination.port', '')
+        proto = self._get_val(e, 'network.protocol', '')
+        if dst_ip and dst_port:
+            return f"{proto}:{dst_ip}:{dst_port}" if proto else f"{dst_ip}:{dst_port}"
+        if dst_ip:
+            return f"{proto}:{dst_ip}" if proto else dst_ip
+        return proto or "network"
+
+    def _has_file_data(self, e: Any) -> bool:
+        return bool(self._get_val(e, 'file.path')) or bool(self._get_val(e, 'file.name'))
+
+    def _has_network_data(self, e: Any) -> bool:
+        return bool(self._get_val(e, 'network.protocol') or self._get_val(e, 'source.ip') or self._get_val(e, 'destination.ip'))
+
+    def _has_auth_data(self, e: Any) -> bool:
+        action = str(self._get_val(e, 'event.action', '') or '').lower()
+        outcome = str(self._get_val(e, 'event.outcome', '') or '').lower()
+        user = self._get_val(e, 'user.name', '')
+        src_ip = self._get_val(e, 'source.ip', '')
+        if action and any(k in action for k in ("login", "logon", "logout", "logoff", "auth")):
+            return True
+        if outcome in ("success", "failure"):
+            return True
+        return bool(user or src_ip)
+
+    def _map_file_relation(self, action: Any) -> str:
+        act = str(action or "").lower()
+        if act in ("read", "open", "access"):
+            return "read"
+        if act in ("write", "create", "modify", "rename", "moved-to", "truncate"):
+            return "write"
+        if act in ("delete", "remove", "unlink"):
+            return "delete"
+        return "file_op"
+
+    def _map_network_relation(self, direction: Any) -> str:
+        dir_val = str(direction or "").lower()
+        if dir_val in ("outbound", "egress"):
+            return "connect_outbound"
+        if dir_val in ("inbound", "ingress"):
+            return "connect_inbound"
+        return "connect"
+
+    def _add_edge(self, source: str, target: str, relation: str, ts: str) -> None:
+        if not source or not target:
+            return
+        if any(e.source == source and e.target == target and e.relation == relation for e in self._edges):
+            return
+        self._edges.append(GraphEdge(source=source, target=target, relation=relation, timestamp=ts))
 
     def _get_val(self, obj, path, default=None):
         curr = getattr(obj, '_data', obj)

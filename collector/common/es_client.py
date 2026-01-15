@@ -9,6 +9,44 @@ class ESClient:
     def __init__(self, hosts=["http://localhost:9200"]):
         self.es = Elasticsearch(hosts)
     
+    def _infer_category(self, event: dict) -> str:
+        memory = event.get("memory", {}) if isinstance(event.get("memory"), dict) else {}
+        if memory.get("anomalies"):
+            return "memory"
+        
+        action = str(event.get("event", {}).get("action", "") or "").lower()
+        outcome = str(event.get("event", {}).get("outcome", "") or "").lower()
+        user = event.get("user", {}).get("name") if isinstance(event.get("user"), dict) else ""
+        src_ip = event.get("source", {}).get("ip") if isinstance(event.get("source"), dict) else ""
+        if action and any(k in action for k in ("login", "logon", "logout", "logoff", "auth")):
+            return "authentication"
+        if outcome in ("success", "failure") and (user or src_ip):
+            return "authentication"
+        
+        network = event.get("network", {}) if isinstance(event.get("network"), dict) else {}
+        source = event.get("source", {}) if isinstance(event.get("source"), dict) else {}
+        destination = event.get("destination", {}) if isinstance(event.get("destination"), dict) else {}
+        if network.get("protocol") or source.get("ip") or destination.get("ip"):
+            return "network"
+        
+        file_info = event.get("file", {}) if isinstance(event.get("file"), dict) else {}
+        if file_info.get("path") or file_info.get("name"):
+            return "file"
+        
+        process = event.get("process", {}) if isinstance(event.get("process"), dict) else {}
+        if process.get("pid") or process.get("executable") or process.get("name"):
+            return "process"
+        
+        return ""
+
+    def _ensure_category(self, event: dict) -> None:
+        if "event" not in event:
+            event["event"] = {}
+        if not event["event"].get("category"):
+            inferred = self._infer_category(event)
+            if inferred:
+                event["event"]["category"] = inferred
+    
     def write_event(self, event: dict, index_prefix: str = "unified-logs") -> str:
         """写入单条事件"""
         if "event" not in event:
@@ -17,6 +55,7 @@ class ESClient:
             event["event"]["id"] = str(uuid.uuid4())
         if "@timestamp" not in event:
             event["@timestamp"] = datetime.utcnow().isoformat() + "Z"
+        self._ensure_category(event)
         
         date_str = datetime.utcnow().strftime("%Y.%m.%d")
         index_name = f"{index_prefix}-{date_str}"
@@ -35,6 +74,7 @@ class ESClient:
                 event["event"]["id"] = str(uuid.uuid4())
             if "@timestamp" not in event:
                 event["@timestamp"] = datetime.utcnow().isoformat() + "Z"
+            self._ensure_category(event)
             actions.append({
                 "_index": index_name,
                 "_source": event
