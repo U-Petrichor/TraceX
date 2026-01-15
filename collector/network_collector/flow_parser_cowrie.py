@@ -21,7 +21,9 @@ except ImportError:
 
 class CowrieParser:
     def __init__(self):
-        self.es_client = ESClient(hosts=["http://localhost:9200"])
+        # Allow configuration via environment variable for distributed deployment
+        es_host = os.getenv("ES_HOST", "http://localhost:9200")
+        self.es_client = ESClient(hosts=[es_host])
         self.log_path = "/root/TraceX/infrastructure/range/honeypots/cowrie/var/log/cowrie/cowrie.json"
         # [Schema v4.0 关键] 获取真实主机名，确保图谱节点 ID 一致
         self.hostname = socket.gethostname()
