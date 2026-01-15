@@ -16,7 +16,7 @@
       return saved;
     }
     if (window.location.protocol === "file:") {
-      return "http://localhost:8010";
+      return "http://localhost:8000";
     }
     return window.location.origin;
   })();

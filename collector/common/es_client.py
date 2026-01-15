@@ -7,7 +7,14 @@ import uuid
 class ESClient:
     """Elasticsearch 客户端封装"""
     def __init__(self, hosts=["http://localhost:9200"]):
-        self.es = Elasticsearch(hosts)
+        # Add basic auth or token if needed, but for local docker usually defaults are fine.
+        # Ensure retry logic and timeouts are robust
+        self.es = Elasticsearch(
+            hosts,
+            max_retries=3,
+            retry_on_timeout=True,
+            request_timeout=30
+        )
     
     def _infer_category(self, event: dict) -> str:
         memory = event.get("memory", {}) if isinstance(event.get("memory"), dict) else {}

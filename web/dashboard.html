@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TraceX Atlas - 总览</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+    <script src="assets/app.js" defer></script>
+    <script src="assets/dashboard.js" defer></script>
+  </head>
+  <body data-page="dashboard">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>TraceX Atlas</span>
+      </div>
+      <nav class="nav">
+        <a href="dashboard.html" data-nav="dashboard">总览</a>
+        <a href="threats.html" data-nav="threats">威胁</a>
+        <a href="graph.html" data-nav="graph">攻击图谱</a>
+        <a href="logs.html" data-nav="logs">日志</a>
+      </nav>
+      <div class="top-controls">
+        <div class="status-pill" data-tone="live">
+          <span class="status-dot"></span>
+          <span class="js-status">在线</span>
+        </div>
+        <button class="button secondary" data-toggle-panel aria-expanded="false">数据源</button>
+      </div>
+      <div class="data-panel" data-panel hidden>
+        <div class="panel-head">
+          <div class="panel-title">API 地址</div>
+          <button class="panel-close" type="button" data-panel-close>关闭</button>
+        </div>
+        <div class="input-group">
+          <input class="input" id="apiBaseInput" type="text" placeholder="http://localhost:8000" />
+          <button class="button" id="apiBaseSave">保存</button>
+        </div>
+        <div class="inline-note">提示：使用 FastAPI 服务地址或反向代理。</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-card" data-delay="1">
+          <div class="tag">统一遥测</div>
+          <h1 class="hero-title">以直观指挥台重建攻击溯源全景</h1>
+          <p class="hero-subtitle">
+            TraceX Atlas 将主机日志、网络流量与蜜罐信号编织成一条攻击叙事
+          </p>
+          <div class="hero-actions">
+            <a class="button" href="threats.html">打开威胁中控</a>
+            <a class="button secondary" href="graph.html">查看攻击图谱</a>
+          </div>
+        </div>
+        <div class="hero-card" data-delay="2">
+          <div class="tag">脉冲舱</div>
+          <h2 class="card-title">信号强度</h2>
+          <div class="pulse">
+            <div class="pulse-ring"></div>
+            <div class="pulse-core">
+              <div class="pulse-value" id="threatRatePulse">--%</div>
+              <div class="pulse-label">威胁比例</div>
+            </div>
+          </div>
+          <div class="inline-note" id="periodLabel">最近 24 小时</div>
+        </div>
+      </section>
+
+      <section class="grid cols-4">
+        <div class="card" data-delay="1">
+          <div class="card-header">
+            <div class="card-title">事件总量</div>
+            <span class="badge safe">遥测</span>
+          </div>
+          <div class="card-value" id="totalEvents">--</div>
+          <div class="card-sub">全部索引</div>
+        </div>
+        <div class="card" data-delay="2">
+          <div class="card-header">
+            <div class="card-title">威胁信号</div>
+            <span class="badge danger">检出</span>
+          </div>
+          <div class="card-value" id="threatCount">--</div>
+          <div class="card-sub">高置信</div>
+        </div>
+        <div class="card" data-delay="3">
+          <div class="card-header">
+            <div class="card-title">威胁占比</div>
+            <span class="badge warn">比例</span>
+          </div>
+          <div class="card-value" id="threatRate">--%</div>
+          <div class="card-sub">事件/威胁比</div>
+        </div>
+        <div class="card" data-delay="3">
+          <div class="card-header">
+            <div class="card-title">时间窗</div>
+            <span class="badge">范围</span>
+          </div>
+          <div class="card-value" id="windowValue">24 小时</div>
+          <div class="card-sub">
+            <label class="inline-note" for="rangeSelect">选择范围</label>
+            <select class="select" id="rangeSelect">
+              <option value="6">最近 6 小时</option>
+              <option value="12">最近 12 小时</option>
+              <option value="24" selected>最近 24 小时</option>
+              <option value="72">最近 72 小时</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid cols-2">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">事件速度</div>
+            <span class="inline-note">实时直方图</span>
+          </div>
+          <div id="trendChart" class="chart"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">MITRE 战术分布</div>
+            <span class="inline-note">热门技法</span>
+          </div>
+          <div id="tacticChart" class="chart"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">最新信号</div>
+          <span class="inline-note">实时高亮</span>
+        </div>
+        <div class="list" id="signalList"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>TraceX Atlas 可视化</div>
+      <div class="mono">由 TraceX API 驱动</div>
+    </footer>
+  </body>
+</html>

@@ -11,7 +11,7 @@ services:
     ports:
       - "9200:9200"
     volumes:
-      - /root/TraceX/data/elasticsearch:/usr/share/elasticsearch/data
+      - /root/TraceX/data/es-01-16-0412:/usr/share/elasticsearch/data
     networks:
       - attack-range
 
