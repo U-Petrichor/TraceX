@@ -41,32 +41,83 @@ class WinAgentDC(WinAgent):
     def _get_powershell_events(self, start_time: datetime):
         """
         Uses PowerShell to fetch Security logs.
-        Focuses on: 4624 (Logon), 4625 (Fail), 4720 (User Create), 4726 (User Delete)
+        Focuses on: 
+        - 4624 (Logon Success - Local)
+        - 4625 (Logon Failed - Local)
+        - 4768 (Kerberos TGT Request - Domain Login)
+        - 4776 (NTLM Auth - Domain Login)
+        - 4720 (User Create)
+        - 4726 (User Delete)
         """
         ps_script = f"""
-        $ids = @(4624, 4625, 4720, 4726)
+        $ids = @(4624, 4625, 4768, 4776, 4720, 4726)
         $time = (Get-Date).AddSeconds(-15)
         Get-WinEvent -FilterHashtable @{{LogName='Security'; ID=$ids; StartTime=$time}} -ErrorAction SilentlyContinue | 
-        Select-Object TimeCreated, Id, Message, @{{N='Account';E={{$_.Properties[5].Value}}}} | 
+        Select-Object TimeCreated, Id, Message, @{{N='EventData';E={{$_.ToXml()}}}} | 
         ConvertTo-Json -Compress
         """
         
         try:
             # Run PowerShell
             cmd = ["powershell", "-Command", ps_script]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             
             if not result.stdout.strip():
                 return []
                 
             data = result.stdout.strip()
-            if data.startswith('{'):
-                events = [json.loads(data)]
-            else:
+            # Handle single object vs array
+            if data.startswith('['):
                 events = json.loads(data)
+            else:
+                events = [json.loads(data)]
                 
-            return events
+            # Parse XML data for each event to get clean dict
+            parsed_events = []
+            for evt in events:
+                try:
+                    # Convert PowerShell XML output to dict-like structure if needed
+                    # Or just pass the raw XML/dict to log_parser
+                    # Here we simplify: Just pass the raw event, let log_parser handle XML parsing if possible
+                    # But since we used ToXml(), we need to parse it or extract key fields here.
+                    # Better approach: Let's extract key fields in PowerShell to avoid complex XML parsing in Python
+                    pass 
+                except:
+                    continue
             
+            # Re-implementation of PowerShell script to return cleaner JSON directly
+            # To avoid XML parsing hell in Python, we extract properties in PowerShell
+            ps_script_clean = f"""
+            $ids = @(4624, 4625, 4768, 4776, 4720, 4726)
+            $time = (Get-Date).AddSeconds(-15)
+            Get-WinEvent -FilterHashtable @{{LogName='Security'; ID=$ids; StartTime=$time}} -ErrorAction SilentlyContinue | 
+            ForEach-Object {{
+                $evt = $_
+                $xml = [xml]$evt.ToXml()
+                $data = @{{}}
+                $xml.Event.EventData.Data | ForEach-Object {{ $data[$_.Name] = $_.'#text' }}
+                
+                @{{
+                    TimeCreated = $evt.TimeCreated
+                    Id = $evt.Id
+                    Message = $evt.Message
+                    EventData = $data
+                }}
+            }} | ConvertTo-Json -Compress -Depth 2
+            """
+            
+            cmd = ["powershell", "-Command", ps_script_clean]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            
+            if not result.stdout.strip():
+                return []
+                
+            data = result.stdout.strip()
+            if data.startswith('['):
+                return json.loads(data)
+            else:
+                return [json.loads(data)]
+
         except subprocess.TimeoutExpired:
             logger.error("PowerShell log query timed out")
             return []
@@ -97,6 +148,12 @@ class WinAgentDC(WinAgent):
                 elif event_id == 4625:
                     action = "login-failed"
                     severity = 5 # Medium risk
+                elif event_id == 4768: # Kerberos TGT Request (Domain Login)
+                    action = "login-attempt-domain"
+                    severity = 1
+                elif event_id == 4776: # NTLM Auth (Domain Login)
+                    action = "login-attempt-ntlm"
+                    severity = 1
                 elif event_id == 4720:
                     action = "user-created"
                     severity = 5

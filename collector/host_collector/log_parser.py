@@ -54,11 +54,50 @@ class HostLogParser:
         data = win_log.get("EventData", win_log)
         
         if event_id == 4624:
-            event.event.category = "authentication"
-            event.event.action = "login"
+            event.event.category = "iam"
+            event.event.action = "login-success"
+            event.event.outcome = "success"
+            event.event.severity = 1
+            # 兼容 PowerShell 解析的扁平字典或嵌套结构
+            target_user = data.get("TargetUserName")
+            if not target_user and isinstance(data, list): # 处理可能的 List 格式
+                 for item in data:
+                     if isinstance(item, dict) and item.get("Name") == "TargetUserName":
+                         target_user = item.get("#text") or item.get("Value")
+            
+            event.user.name = target_user or ""
+            
+            # 尝试提取源 IP
+            ip_addr = data.get("IpAddress")
+            if not ip_addr and "NetworkInformation" in data: # 某些 XML 结构
+                ip_addr = data["NetworkInformation"].get("SourceAddress")
+            
+            # 过滤掉本地 IP (::1, 127.0.0.1, -)
+            if ip_addr and ip_addr not in ["-", "::1", "127.0.0.1"]:
+                event.source.ip = ip_addr
+
+        elif event_id == 4768: # Kerberos TGT Request (域登录请求)
+            event.event.category = "iam"
+            event.event.action = "login-attempt-domain" # 相当于域内的"登录尝试"
+            event.event.outcome = "success" # TGT 请求成功通常意味着密码正确
+            event.event.severity = 1
+            
+            # 提取用户名 (TargetUserName)
+            event.user.name = data.get("TargetUserName", "")
+            
+            # 提取源 IP (IpAddress) - 格式通常是 ::ffff:192.168.x.x
+            raw_ip = data.get("IpAddress", "")
+            if raw_ip:
+                # 清洗 IP，去掉 ::ffff: 前缀
+                event.source.ip = raw_ip.replace("::ffff:", "")
+
+        elif event_id == 4776: # NTLM Auth (老式域登录)
+            event.event.category = "iam"
+            event.event.action = "login-attempt-ntlm"
             event.event.outcome = "success"
             event.user.name = data.get("TargetUserName", "")
-            event.source.ip = data.get("IpAddress", "")
+            event.source.ip = data.get("Workstation", "") # NTLM 记录的是主机名而非 IP，暂时存在 source.ip 里或者 source.host.name
+
         elif event_id == 4688:
             event.event.category = "process"
             event.event.action = "process_created"
