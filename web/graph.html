@@ -14,6 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
     <script src="assets/app.js" defer></script>
     <script src="assets/graph.js" defer></script>
+    <script src="assets/apt.js" defer></script>
   </head>
   <body data-page="graph">
     <header class="topbar">
@@ -47,27 +48,29 @@
       </div>
     </header>
 
-    <main>
-      <section class="page-head">
+    <main class="graph-layout">
+      <section class="page-head graph-head">
         <div>
           <div class="tag">攻击图谱</div>
           <h1 class="hero-title">将横向移动可视化为实时图谱</h1>
           <p class="hero-subtitle">节点与连线仅来自高价值事件</p>
         </div>
-        <div class="input-group">
-          <select class="select" id="rangeSelect" aria-label="时间范围">
-            <option value="6">最近 6 小时</option>
-            <option value="12">最近 12 小时</option>
-            <option value="24" selected>最近 24 小时</option>
-            <option value="72">最近 72 小时</option>
+        <div class="input-group graph-controls">
+          <select class="select" id="dataSelect" aria-label="数据集">
+            <option value="APT28.jsonl" selected>APT28</option>
+            <option value="APT29.jsonl">APT29</option>
+            <option value="FIN7.jsonl">FIN7</option>
+            <option value="Indrik_Spider.jsonl">Indrik Spider</option>
+            <option value="LuminousMoth.jsonl">LuminousMoth</option>
           </select>
+          <!-- Mode selection removed, defaulting to Direct TTP -->
           <button class="button secondary" id="playBtn" type="button">播放</button>
           <button class="button secondary" id="pauseBtn" type="button">暂停</button>
           <button class="button" id="rebuildBtn">重建图谱</button>
         </div>
       </section>
 
-      <section class="grid cols-3">
+      <section class="grid cols-3 graph-metrics">
         <div class="card" data-delay="1">
           <div class="card-header">
             <div class="card-title">节点</div>
@@ -94,15 +97,15 @@
         </div>
       </section>
 
-      <section class="grid cols-2">
-        <div class="panel">
+      <section class="grid cols-2 graph-stage">
+        <div class="panel graph-panel">
           <div class="panel-header">
             <div class="panel-title">攻击关系图</div>
             <span class="inline-note">交互式力导向</span>
           </div>
-          <div id="graphCanvas" class="chart" style="height: 520px"></div>
+          <div id="graphCanvas" class="chart"></div>
         </div>
-        <div class="panel">
+        <div class="panel graph-side">
           <div class="panel-section">
             <div class="panel-header">
               <div class="panel-title">路径洞察</div>
@@ -118,6 +121,153 @@
             </div>
             <div class="sequence-rail" id="sequenceList"></div>
           </div>
+        </div>
+      </section>
+
+      <section class="panel apt-summary-panel">
+        <div class="panel-header">
+          <div class="panel-title">APT 模拟输出</div>
+          <span class="inline-note" id="aptMeta">等待数据</span>
+        </div>
+        <div class="grid cols-4 apt-summary">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">APT 模拟</div>
+              <span class="badge safe">ATLAS</span>
+            </div>
+            <div class="card-value" id="aptName">--</div>
+            <div class="card-sub" id="aptAliases">别名 --</div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">模式</div>
+              <span class="badge">链路</span>
+            </div>
+            <div class="card-value" id="aptMode">--</div>
+            <div class="card-sub">攻击链推演</div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">事件数</div>
+              <span class="badge warn">TTP</span>
+            </div>
+            <div class="card-value" id="aptEventCount">--</div>
+            <div class="card-sub">输入日志</div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">图谱规模</div>
+              <span class="badge safe">关系</span>
+            </div>
+            <div class="card-value" id="aptGraphScale">--</div>
+            <div class="card-sub">
+              <span id="aptNodeCount">--</span> 节点 · <span id="aptEdgeCount">--</span> 边
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid cols-2 apt-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">攻击链签名 (ATLAS)</div>
+            <span class="inline-note">关键动作序列</span>
+          </div>
+          <div class="apt-chain" id="aptSignature"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">TTP 归因结果</div>
+            <span class="inline-note">疑似组织匹配</span>
+          </div>
+          <div class="apt-kpis">
+            <div class="apt-kpi">
+              <div class="inline-note">疑似组织</div>
+              <div class="apt-metric" id="aptSuspected">--</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="inline-note">置信度</div>
+              <div class="apt-metric" id="aptConfidence">--</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="inline-note">Jaccard</div>
+              <div class="apt-metric" id="aptJaccard">--</div>
+            </div>
+            <div class="apt-kpi">
+              <div class="inline-note">召回率</div>
+              <div class="apt-metric" id="aptRecall">--</div>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">匹配 TTP</div>
+              <span class="inline-note" id="aptTtpCount">--</span>
+            </div>
+            <div class="apt-tags" id="aptMatchedTtps"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">Top 匹配</div>
+              <span class="inline-note">相似度排行</span>
+            </div>
+            <div class="apt-match-list" id="aptTopMatches"></div>
+          </div>
+        </div>
+        <div class="panel apt-span-2">
+          <div class="panel-header">
+            <div class="panel-title">攻击链条结构</div>
+            <span class="inline-note">节点 → 边 → 节点</span>
+          </div>
+          <div class="apt-structure" id="aptStructure"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">APT Profile</div>
+            <span class="inline-note">画像与关联技法</span>
+          </div>
+          <div class="apt-profile-grid">
+            <div class="apt-profile-item">
+              <div class="inline-note">组织名称</div>
+              <div class="apt-metric" id="aptProfileName">--</div>
+            </div>
+            <div class="apt-profile-item">
+              <div class="inline-note">别名数量</div>
+              <div class="apt-metric" id="aptAliasCount">--</div>
+            </div>
+            <div class="apt-profile-item">
+              <div class="inline-note">技法数量</div>
+              <div class="apt-metric" id="aptProfileTtpCount">--</div>
+            </div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">别名</div>
+              <span class="inline-note">APT 组织别称</span>
+            </div>
+            <div class="apt-tags" id="aptProfileAliases"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">核心 TTP</div>
+              <span class="inline-note">Top 技法</span>
+            </div>
+            <div class="apt-tags" id="aptProfileTtps"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">目标行业</div>
+              <span class="inline-note">情报视角</span>
+            </div>
+            <div class="apt-tags" id="aptProfileIndustries"></div>
+          </div>
+        </div>
+        <div class="panel apt-span-2">
+          <div class="panel-header">
+            <div class="panel-title">IOC 富化结果</div>
+            <span class="inline-note">风险评分与标签</span>
+          </div>
+          <div class="apt-ioc-grid" id="aptIocGrid"></div>
         </div>
       </section>
     </main>

@@ -1,8 +1,9 @@
 (() => {
-  const { fetchJson, sample, safeGet, formatTime, formatNumber } = window.TraceX;
+  const { fetchJson, formatNumber } = window.TraceX;
 
   const els = {
-    range: document.querySelector("#rangeSelect"),
+    data: document.querySelector("#dataSelect"),
+    mode: document.querySelector("#modeSelect"),
     rebuildBtn: document.querySelector("#rebuildBtn"),
     nodeCount: document.querySelector("#nodeCount"),
     edgeCount: document.querySelector("#edgeCount"),
@@ -19,6 +20,35 @@
   let playBtn;
   let pauseBtn;
 
+  const TYPE_CATEGORY = {
+    host: 0,
+    network: 1,
+    process: 2,
+    user: 3,
+    file: 4,
+    technique: 5,
+  };
+
+  const CATEGORY_CONFIG = [
+    { name: "主机", itemStyle: { color: "#00a6a6" } },
+    { name: "网络", itemStyle: { color: "#ff7a18" } },
+    { name: "进程", itemStyle: { color: "#2a3a55" } },
+    { name: "用户", itemStyle: { color: "#f5b700" } },
+    { name: "文件", itemStyle: { color: "#9fd4ff" } },
+    { name: "技术", itemStyle: { color: "#e11d48" } }, // TNode (Technique)
+    { name: "未知", itemStyle: { color: "#9aa3b2" } },
+  ];
+
+  const SIZE_MAP = {
+    host: 44,
+    network: 36,
+    process: 32,
+    user: 30,
+    file: 28,
+    technique: 40,
+    unknown: 28,
+  };
+
   const stopAnimation = () => {
     if (animationTimer) {
       window.clearInterval(animationTimer);
@@ -33,116 +63,145 @@
     }
   };
 
-
-  const parseTime = (event) => {
-    const raw = event?.["@timestamp"];
-    if (!raw) {
-      return Number.POSITIVE_INFINITY;
+  const normalizeType = (value) => {
+    const raw = String(value || "unknown").toLowerCase();
+    if (raw === "ip" || raw === "net" || raw === "network") {
+      return "network";
     }
-    const time = new Date(raw).getTime();
-    return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+    if (raw === "proc" || raw === "process") {
+      return "process";
+    }
+    if (raw === "usr" || raw === "user") {
+      return "user";
+    }
+    if (raw === "file") {
+      return "file";
+    }
+    if (raw === "host" || raw === "endpoint") {
+      return "host";
+    }
+    if (raw === "tnode" || raw === "technique" || raw === "tactic") {
+      return "technique";
+    }
+    return "unknown";
   };
 
-  const isIpAddress = (value) => /^(\d{1,3}\.){3}\d{1,3}$/.test(value);
+  const shortenLabel = (label, type) => {
+    const raw = label || "-";
+    if (type === "file" || type === "process") {
+      const parts = raw.split(/[/\\]/);
+      return parts[parts.length - 1] || raw;
+    }
+    if (type === "network") {
+      return raw.replace(/^https?:/i, "");
+    }
+    if (raw.length <= 22) {
+      return raw;
+    }
+    return `${raw.slice(0, 10)}…${raw.slice(-8)}`;
+  };
 
-  const createNode = (id, label, category, size) => ({
+  const createNode = (id, label, type) => ({
     id,
-    name: label,
-    category: isIpAddress(label) ? 1 : category,
-    symbolSize: size,
+    name: label || "-",
+    displayName: shortenLabel(label || "-", type),
+    category: TYPE_CATEGORY[type] ?? 5,
+    symbolSize: SIZE_MAP[type] || SIZE_MAP.unknown,
   });
 
-  const buildStepFromEvent = (event, index) => {
-    const srcIp = safeGet(event, "source.ip", null);
-    const dstIp = safeGet(event, "destination.ip", null);
-    const host = safeGet(event, "host.name", null);
-    const process = safeGet(event, "process.name", null);
-    const user = safeGet(event, "user.name", null);
-    const technique = safeGet(event, "threat.technique.name", null);
-
-    const nodes = [];
-    const edges = [];
-    const add = (id, label, category, size) => {
-      if (id) {
-        nodes.push(createNode(id, label, category, size));
+  const parseChainItem = (item) => {
+    if (!item) {
+      return null;
+    }
+    if (typeof item === "string") {
+      const match = item.match(/\[(.+?)\]\s+(.+?)\s+--(.+?)-->\s+\[(.+?)\]\s+(.+)/);
+      if (!match) {
+        return null;
       }
-    };
-
-    add(host, host, 0, 42);
-    add(srcIp, srcIp, 1, 32);
-    add(dstIp, dstIp, 1, 30);
-    add(process, process, 2, 28);
-    add(user, user, 3, 26);
-    add(technique, technique, 4, 24);
-
-    if (srcIp && host) {
-      edges.push({ source: srcIp, target: host });
+      return {
+        sourceType: normalizeType(match[1]),
+        sourceLabel: match[2].trim(),
+        relation: match[3].trim(),
+        targetType: normalizeType(match[4]),
+        targetLabel: match[5].trim(),
+      };
     }
-    if (host && process) {
-      edges.push({ source: host, target: process });
+    const source = item.source || item.from || item.src || item.source_label;
+    const target = item.target || item.to || item.dst || item.target_label;
+    const sourceLabel = typeof source === "string" ? source : source?.label || source?.name || source?.id;
+    const targetLabel = typeof target === "string" ? target : target?.label || target?.name || target?.id;
+    if (!sourceLabel || !targetLabel) {
+      return null;
     }
-    if (process && user) {
-      edges.push({ source: process, target: user });
-    }
-    if (srcIp && dstIp) {
-      edges.push({ source: srcIp, target: dstIp });
-    }
-    if (process && technique) {
-      edges.push({ source: process, target: technique });
-    }
-    if (host && technique) {
-      edges.push({ source: host, target: technique });
-    }
-
-    const primaryId = technique || process || host || srcIp || dstIp || user || null;
-
     return {
-      index: index + 1,
-      title: safeGet(event, "threat.technique.name", "可疑活动"),
-      tactic: safeGet(event, "threat.tactic.name", "未知"),
-      time: formatTime(event["@timestamp"]),
-      path: `${safeGet(event, "source.ip", "-")} -> ${safeGet(event, "destination.ip", "-")}`,
-      nodes,
-      edges,
-      primaryId,
+      sourceType: normalizeType(item.source_type || item.sourceType || source?.type),
+      sourceLabel: sourceLabel,
+      relation: item.relation || item.edge || item.link || "related",
+      targetType: normalizeType(item.target_type || item.targetType || target?.type),
+      targetLabel: targetLabel,
     };
   };
 
-  const buildSequence = (attacks) => {
-    const maxSteps = 10;
-    const ordered = [...attacks].sort((a, b) => parseTime(a) - parseTime(b)).slice(0, maxSteps);
-    const fallbackEvents = [
-      {
-        "@timestamp": "2024-01-11T00:00:00Z",
-        source: { ip: "203.0.113.5" },
-        host: { name: "核心主机" },
-        threat: { tactic: { name: "初始访问" }, technique: { name: "初始访问" } },
-      },
-      {
-        "@timestamp": "2024-01-11T00:06:00Z",
-        source: { ip: "203.0.113.5" },
-        destination: { ip: "172.20.0.21" },
-        host: { name: "核心主机" },
-        process: { name: "SSH" },
-        threat: { tactic: { name: "执行" }, technique: { name: "命令与脚本" } },
-      },
-      {
-        "@timestamp": "2024-01-11T00:12:00Z",
-        destination: { ip: "172.20.0.22" },
-        host: { name: "内网跳板" },
-        process: { name: "SSH" },
-        threat: { tactic: { name: "横向移动" }, technique: { name: "横向移动" } },
-      },
-      {
-        "@timestamp": "2024-01-11T00:20:00Z",
-        host: { name: "内网跳板" },
-        user: { name: "admin" },
-        threat: { tactic: { name: "防御规避" }, technique: { name: "清理痕迹" } },
-      },
-    ];
+  const normalizeChain = (rawChain) => {
+    const list = Array.isArray(rawChain) ? rawChain : [];
+    const parsed = list.map((item) => parseChainItem(item)).filter(Boolean);
+    const seen = new Set();
+    return parsed.filter((edge) => {
+      const key = `${edge.sourceType}:${edge.sourceLabel}|${edge.relation}|${edge.targetType}:${edge.targetLabel}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
 
-    const base = ordered.length > 0 ? ordered : fallbackEvents;
-    const steps = base.map((event, index) => buildStepFromEvent(event, index));
+  const buildGraph = (chain) => {
+    const nodeMap = new Map();
+    const edgeMap = new Map();
+    chain.forEach((edge) => {
+      const sourceId = `${edge.sourceType}:${edge.sourceLabel}`;
+      const targetId = `${edge.targetType}:${edge.targetLabel}`;
+      if (!nodeMap.has(sourceId)) {
+        nodeMap.set(sourceId, createNode(sourceId, edge.sourceLabel, edge.sourceType));
+      }
+      if (!nodeMap.has(targetId)) {
+        nodeMap.set(targetId, createNode(targetId, edge.targetLabel, edge.targetType));
+      }
+      const key = `${sourceId}|${edge.relation}|${targetId}`;
+      if (!edgeMap.has(key)) {
+        edgeMap.set(key, { source: sourceId, target: targetId, relation: edge.relation });
+      }
+    });
+    return { nodes: [...nodeMap.values()], edges: [...edgeMap.values()] };
+  };
+
+  const buildStepsFromChain = (chain) => {
+    const steps = chain.map((edge, index) => {
+      const sourceId = `${edge.sourceType}:${edge.sourceLabel}`;
+      const targetId = `${edge.targetType}:${edge.targetLabel}`;
+      const nodes = [
+        createNode(sourceId, edge.sourceLabel, edge.sourceType),
+        createNode(targetId, edge.targetLabel, edge.targetType),
+      ];
+      const edges = [{ source: sourceId, target: targetId }];
+      return {
+        index: index + 1,
+        title: `${shortenLabel(edge.sourceLabel, edge.sourceType)} → ${shortenLabel(
+          edge.targetLabel,
+          edge.targetType
+        )}`,
+        tactic: edge.relation || "路径",
+        time: `步骤 ${index + 1}`,
+        path: `${shortenLabel(edge.sourceLabel, edge.sourceType)} -> ${shortenLabel(
+          edge.targetLabel,
+          edge.targetType
+        )}`,
+        nodes,
+        edges,
+        primaryId: targetId,
+      };
+    });
 
     steps.forEach((step, index) => {
       if (index === 0 || !step.primaryId) {
@@ -213,65 +272,83 @@
     if (!graphChart) {
       return;
     }
-    const nodes = graph.nodes;
-    const edges = graph.edges;
-    graphChart.setOption({
-      tooltip: {
-        formatter: (params) => params.data.name,
-        backgroundColor: "rgba(17, 24, 39, 0.85)",
-        textStyle: { color: "#f7f1e6" },
+    graphChart.setOption(
+      {
+        tooltip: {
+          formatter: (params) => {
+            if (params.data?.relation) {
+              return `${params.data.relation}<br/>${params.data.source} → ${params.data.target}`;
+            }
+            return params.data.name;
+          },
+          backgroundColor: "rgba(17, 24, 39, 0.85)",
+          textStyle: { color: "#f7f1e6" },
+        },
+        legend: [
+          {
+            data: CATEGORY_CONFIG.map((item) => item.name),
+            bottom: 0,
+          },
+        ],
+        animationDurationUpdate: 1500,
+        animationEasingUpdate: "cubicOut",
+        series: [
+          {
+            type: "graph",
+            layout: "force",
+            data: graph.nodes,
+            links: graph.edges,
+            roam: true,
+            label: {
+              show: true,
+              color: "#1d2433",
+              fontSize: 11,
+              backgroundColor: "rgba(255, 255, 255, 0.75)",
+              padding: [2, 6],
+              borderRadius: 6,
+              width: 120,
+              overflow: "truncate",
+              formatter: (params) => params.data.displayName || params.data.name,
+            },
+            labelLayout: { hideOverlap: true },
+            force: { repulsion: 220, edgeLength: [120, 200], gravity: 0.08 },
+            edgeSymbol: ["none", "arrow"],
+            edgeSymbolSize: 6,
+            categories: CATEGORY_CONFIG,
+            lineStyle: { color: "rgba(17, 24, 39, 0.16)", width: 1.2, curveness: 0.18 },
+            emphasis: {
+              focus: "adjacency",
+              lineStyle: { color: "#ff7a18", width: 2.6 },
+            },
+          },
+        ],
       },
-      legend: [
-        {
-          data: ["主机", "IP", "进程", "用户", "技法"],
-          bottom: 0,
-        },
-      ],
-      animationDurationUpdate: 1500,
-      animationEasingUpdate: "cubicOut",
-      series: [
-        {
-          type: "graph",
-          layout: "force",
-          data: nodes,
-          links: edges,
-          roam: true,
-          label: { show: true, color: "#1d2433", fontSize: 11 },
-          force: { repulsion: 140, edgeLength: 100 },
-          edgeSymbol: ["none", "arrow"],
-          edgeSymbolSize: 8,
-          categories: [
-            { name: "主机", itemStyle: { color: "#00a6a6" } },
-            { name: "IP", itemStyle: { color: "#ff7a18" } },
-            { name: "进程", itemStyle: { color: "#2a3a55" } },
-            { name: "用户", itemStyle: { color: "#f5b700" } },
-            { name: "技法", itemStyle: { color: "#9fd4ff" } },
-          ],
-          lineStyle: { color: "rgba(17, 24, 39, 0.2)", width: 1.4 },
-        },
-      ],
-    }, true);
+      true
+    );
   };
 
-  const renderFlow = (attacks) => {
+  const renderFlow = (chain) => {
     if (!els.flowList) {
       return;
     }
     els.flowList.innerHTML = "";
-    const ordered = [...attacks].sort((a, b) => parseTime(b) - parseTime(a)).slice(0, 8);
-    ordered.forEach((event) => {
+    if (!chain.length) {
+      const empty = document.createElement("div");
+      empty.className = "list-item";
+      empty.textContent = "暂无路径数据";
+      els.flowList.appendChild(empty);
+      return;
+    }
+    chain.slice(0, 8).forEach((edge) => {
       const item = document.createElement("div");
       item.className = "list-item";
       const title = document.createElement("strong");
-      const technique = safeGet(event, "threat.technique.name", "可疑活动");
-      title.textContent = technique;
-      const meta = document.createElement("span");
-      const path = `${safeGet(event, "source.ip", "-")} -> ${safeGet(
-        event,
-        "destination.ip",
-        "-"
+      title.textContent = `${shortenLabel(edge.sourceLabel, edge.sourceType)} → ${shortenLabel(
+        edge.targetLabel,
+        edge.targetType
       )}`;
-      meta.textContent = `${path} | ${formatTime(event["@timestamp"])}`;
+      const meta = document.createElement("span");
+      meta.textContent = `[${edge.sourceType}] ${edge.relation} → [${edge.targetType}]`;
       item.appendChild(title);
       item.appendChild(meta);
       els.flowList.appendChild(item);
@@ -283,6 +360,13 @@
       return;
     }
     els.sequenceList.innerHTML = "";
+    if (!steps.length) {
+      const empty = document.createElement("div");
+      empty.className = "inline-note";
+      empty.textContent = "暂无攻击链序列";
+      els.sequenceList.appendChild(empty);
+      return;
+    }
     steps.forEach((step) => {
       const item = document.createElement("div");
       item.className = "sequence-step";
@@ -409,25 +493,49 @@
     animationTimer = window.setInterval(tick, ANIMATION_INTERVAL);
   };
 
-  const load = async () => {
-    const hours = parseInt(els.range?.value || "24", 10);
-    const attacksData = await fetchJson(`/api/attacks?hours=${hours}&limit=80`, sample.attacks);
-    const attacks = attacksData.attacks || [];
+  const buildRequestUrl = (refresh) => {
+    const data = els.data?.value || "APT28.jsonl";
+    // const mode = els.mode?.value || "direct"; // Removed mode selection
+    const mode = "direct";
+    const refreshFlag = refresh ? "&refresh=1" : "";
+    return `/api/apt-report?mode=${encodeURIComponent(mode)}&data=${encodeURIComponent(data)}${refreshFlag}`;
+  };
 
-    const steps = buildSequence(attacks);
+  const load = async (refresh = false) => {
+    const report = await fetchJson(buildRequestUrl(refresh));
+    if (report?.error) {
+      renderFlow([]);
+      renderSequenceList([]);
+      renderGraph({ nodes: [], edges: [] });
+      updateCounts({ nodes: [], edges: [] });
+      return;
+    }
+    const payload = report?.report || report || {};
+    const chain = normalizeChain(payload.attack_chain_structure);
+    const graph = buildGraph(chain);
+    const steps = buildStepsFromChain(chain);
+
     renderSequenceList(steps);
-    playSequence(steps);
-    renderFlow(attacks);
+    renderFlow(chain);
+    if (steps.length) {
+      playSequence(steps);
+    } else {
+      renderGraph(graph);
+      updateCounts(graph);
+    }
   };
 
   document.addEventListener("DOMContentLoaded", () => {
     initChart();
     load();
     if (els.rebuildBtn) {
-      els.rebuildBtn.addEventListener("click", load);
+      els.rebuildBtn.addEventListener("click", () => load(true));
     }
-    if (els.range) {
-      els.range.addEventListener("change", load);
+    if (els.data) {
+      els.data.addEventListener("change", () => load(true));
+    }
+    if (els.mode) {
+      els.mode.addEventListener("change", () => load(true));
     }
     playBtn = document.querySelector("#playBtn");
     pauseBtn = document.querySelector("#pauseBtn");

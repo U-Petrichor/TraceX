@@ -11,6 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="assets/styles.css" />
+    <link rel="stylesheet" href="assets/styles_extra.css" />
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
     <script src="assets/app.js" defer></script>
     <script src="assets/threats.js" defer></script>
@@ -130,6 +131,42 @@
         <div class="grid cols-3" id="threatGrid"></div>
       </section>
     </main>
+
+    <!-- Detail Modal -->
+    <div id="detailModal" class="modal" hidden>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="modalTitle">威胁详情</h2>
+          <button class="modal-close" id="modalClose">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid cols-2">
+            <!-- Left: Basic Info & NoDoze -->
+            <div class="detail-section">
+              <h3>基本信息</h3>
+              <div class="kv-list" id="modalBasicInfo"></div>
+              
+              <h3 style="margin-top: 20px;">NoDoze 频率评分</h3>
+              <div class="nodoze-container">
+                <div id="nodozeGauge" style="width: 100%; height: 200px;"></div>
+                <div class="nodoze-desc">
+                  该评分反映了此事件在历史行为中的罕见程度。<br>
+                  <strong id="nodozeScoreVal" style="font-size: 1.2em; color: #ff7a18;"></strong>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Right: ATLAS Chain -->
+            <div class="detail-section">
+              <h3>ATLAS 攻击链溯源</h3>
+              <div class="atlas-chain" id="atlasChain">
+                <!-- Timeline items will be injected here -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <footer class="footer">
       <div>TraceX Atlas 可视化</div>

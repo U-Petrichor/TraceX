@@ -1,0 +1,233 @@
+{
+  "simulation": {
+    "name": "FIN7",
+    "mode": "Sigma 检测",
+    "event_count": 10,
+    "node_count": 13,
+    "edge_count": 14
+  },
+  "attack_chain_signature": [
+    "FILE_MODIFY",
+    "FILE_READ",
+    "FILE_WRITE",
+    "NETWORK_Inbound",
+    "NETWORK_Outbound",
+    "PROCESS"
+  ],
+  "attack_chain_structure": [
+    "[host] PC-1 --host_network--> [network] rdp:192.168.1.5:3389",
+    "[host] PC-1 --host_auth--> [network] rdp:192.168.1.5:3389",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\wbem\\wmic.exe",
+    "[host] PC-1 --host_network--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_auth--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_network--> [network] smb:192.168.1.20:445",
+    "[host] PC-1 --host_auth--> [network] smb:192.168.1.20:445",
+    "[process] Parent:600 --spawned--> [process] C:\\Windows\\System32\\cmd.exe",
+    "[host] PC-1 --host_network--> [network] http:198.51.100.23:80",
+    "[host] PC-1 --host_auth--> [network] http:198.51.100.23:80",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Admin\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\README_ENCRYPTED.txt",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Admin\\Documents\\financial_report.xlsx.encrypted"
+  ],
+  "ttp_attribution": {
+    "suspected_group": "Kimsuky",
+    "confidence": 0.441,
+    "matched_ttps": [
+      "T1140",
+      "T1112",
+      "T1218.011",
+      "T1566",
+      "T1059.007",
+      "T1059.005",
+      "T1003.001",
+      "T1560.001",
+      "T1562.001",
+      "T1059.001",
+      "T1027",
+      "T1059.003",
+      "T1562.004",
+      "T1566.001",
+      "T1218.010"
+    ],
+    "jaccard_similarity": 0.125,
+    "recall": 0.577,
+    "top_matches": [
+      {
+        "group": "Kimsuky",
+        "score": 0.441,
+        "matched_ttps": [
+          "T1140",
+          "T1112",
+          "T1218.011",
+          "T1566",
+          "T1059.007",
+          "T1059.005",
+          "T1003.001",
+          "T1560.001",
+          "T1562.001",
+          "T1059.001"
+        ]
+      },
+      {
+        "group": "Lazarus Group",
+        "score": 0.417,
+        "matched_ttps": [
+          "T1140",
+          "T1218.011",
+          "T1560",
+          "T1059.005",
+          "T1059.003",
+          "T1562.004",
+          "T1562.001",
+          "T1059.001",
+          "T1106",
+          "T1055.001"
+        ]
+      },
+      {
+        "group": "TA505",
+        "score": 0.364,
+        "matched_ttps": [
+          "T1140",
+          "T1112",
+          "T1218.011",
+          "T1059.007",
+          "T1059.005",
+          "T1059.003",
+          "T1562.001",
+          "T1059.001",
+          "T1106",
+          "T1055.001"
+        ]
+      },
+      {
+        "group": "APT32",
+        "score": 0.362,
+        "matched_ttps": [
+          "T1112",
+          "T1218.011",
+          "T1560",
+          "T1059.007",
+          "T1059.005",
+          "T1003.001",
+          "T1059.003",
+          "T1059.001",
+          "T1566.001",
+          "T1059"
+        ]
+      },
+      {
+        "group": "Mustang Panda",
+        "score": 0.359,
+        "matched_ttps": [
+          "T1140",
+          "T1059.007",
+          "T1059.005",
+          "T1003.001",
+          "T1560.001",
+          "T1059.003",
+          "T1027",
+          "T1059.001",
+          "T1106",
+          "T1566.001"
+        ]
+      }
+    ]
+  },
+  "apt_profile": {
+    "name": "Kimsuky",
+    "aliases": [
+      "Kimsuky",
+      "Black Banshee",
+      "Velvet Chollima",
+      "Emerald Sleet",
+      "THALLIUM",
+      "APT43",
+      "TA427",
+      "Springtail"
+    ],
+    "ttps": [
+      "T1560.003",
+      "T1680",
+      "T1594",
+      "T1553.002",
+      "T1070.004",
+      "T1583.006",
+      "T1078.003",
+      "T1587",
+      "T1587.001",
+      "T1567.002",
+      "T1543.003",
+      "T1176.001",
+      "T1550.002",
+      "T1027.016",
+      "T1007",
+      "T1598",
+      "T1102.002",
+      "T1218.011",
+      "T1564.002",
+      "T1566.001"
+    ],
+    "target_industries": []
+  },
+  "ioc_enrichment": {
+    "10.0.0.50": {
+      "type": "ip",
+      "risk_score": 0,
+      "tags": [
+        "internal",
+        "lab"
+      ],
+      "geo": "Internal Network",
+      "source": "local_custom",
+      "is_malicious": false
+    },
+    "192.168.1.5": {
+      "type": "ip",
+      "risk_score": 0,
+      "tags": [
+        "internal",
+        "lab"
+      ],
+      "geo": "Internal Network",
+      "source": "local_custom",
+      "is_malicious": false
+    },
+    "45.33.2.1": {
+      "type": "ip",
+      "risk_score": 90,
+      "tags": [
+        "C2",
+        "Botnet",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "192.168.1.20": {
+      "type": "ip",
+      "risk_score": 0,
+      "tags": [
+        "internal",
+        "lab"
+      ],
+      "geo": "Internal Network",
+      "source": "local_custom",
+      "is_malicious": false
+    },
+    "198.51.100.23": {
+      "type": "ip",
+      "risk_score": 78,
+      "tags": [
+        "Exfiltration",
+        "HTTP-POST",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    }
+  }
+}

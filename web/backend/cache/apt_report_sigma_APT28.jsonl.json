@@ -1,0 +1,238 @@
+{
+  "simulation": {
+    "name": "APT28",
+    "mode": "Sigma 检测",
+    "event_count": 10,
+    "node_count": 12,
+    "edge_count": 15
+  },
+  "attack_chain_signature": [
+    "FILE_READ",
+    "FILE_WRITE",
+    "NETWORK_Outbound",
+    "PROCESS",
+    "SSH_CONNECTION"
+  ],
+  "attack_chain_structure": [
+    "[host] PC-1 --host_network--> [network] ssh:192.168.1.5:22",
+    "[host] PC-1 --host_auth--> [network] ssh:192.168.1.5:22",
+    "[host] PC-1 --host_network--> [network] ssh:192.168.1.5:22",
+    "[host] PC-1 --host_auth--> [network] ssh:192.168.1.5:22",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\net.exe",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe --spawned--> [process] C:\\Users\\Public\\svchost.exe",
+    "[host] PC-1 --host_network--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_auth--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Admin\\Documents\\passwords.txt",
+    "[host] PC-1 --host_network--> [network] https:198.51.100.23:443",
+    "[host] PC-1 --host_auth--> [network] https:198.51.100.23:443",
+    "[host] PC-1 --host_network--> [network] smb:192.168.1.20:445",
+    "[host] PC-1 --host_auth--> [network] smb:192.168.1.20:445",
+    "[host] PC-1 --host_file--> [file] C:\\Windows\\System32\\Tasks\\MicrosoftEdgeUpdateTaskMachineCore"
+  ],
+  "ttp_attribution": {
+    "suspected_group": "Turla",
+    "confidence": 0.445,
+    "matched_ttps": [
+      "T1106",
+      "T1007",
+      "T1069.002",
+      "T1201",
+      "T1087.001",
+      "T1018",
+      "T1059.001",
+      "T1069.001",
+      "T1562.001",
+      "T1112",
+      "T1021.002",
+      "T1560.001",
+      "T1036.005",
+      "T1105",
+      "T1049",
+      "T1087.002"
+    ],
+    "jaccard_similarity": 0.198,
+    "recall": 0.552,
+    "top_matches": [
+      {
+        "group": "Turla",
+        "score": 0.445,
+        "matched_ttps": [
+          "T1106",
+          "T1007",
+          "T1069.002",
+          "T1201",
+          "T1087.001",
+          "T1018",
+          "T1059.001",
+          "T1069.001",
+          "T1562.001",
+          "T1112"
+        ]
+      },
+      {
+        "group": "APT32",
+        "score": 0.439,
+        "matched_ttps": [
+          "T1087.001",
+          "T1560",
+          "T1059",
+          "T1018",
+          "T1059.001",
+          "T1218.011",
+          "T1218.005",
+          "T1112",
+          "T1003.001",
+          "T1021.002"
+        ]
+      },
+      {
+        "group": "OilRig",
+        "score": 0.412,
+        "matched_ttps": [
+          "T1007",
+          "T1069.002",
+          "T1201",
+          "T1059",
+          "T1087.001",
+          "T1059.001",
+          "T1069.001",
+          "T1112",
+          "T1003.001",
+          "T1036"
+        ]
+      },
+      {
+        "group": "Chimera",
+        "score": 0.395,
+        "matched_ttps": [
+          "T1106",
+          "T1007",
+          "T1201",
+          "T1087.001",
+          "T1018",
+          "T1059.001",
+          "T1069.001",
+          "T1021.002",
+          "T1560.001",
+          "T1135"
+        ]
+      },
+      {
+        "group": "Volt Typhoon",
+        "score": 0.382,
+        "matched_ttps": [
+          "T1007",
+          "T1069.002",
+          "T1087.001",
+          "T1018",
+          "T1059.001",
+          "T1069.001",
+          "T1112",
+          "T1003.001",
+          "T1560.001",
+          "T1036.005"
+        ]
+      }
+    ]
+  },
+  "apt_profile": {
+    "name": "Turla",
+    "aliases": [
+      "Turla",
+      "IRON HUNTER",
+      "Group 88",
+      "Waterbug",
+      "WhiteBear",
+      "Snake",
+      "Krypton",
+      "Venomous Bear",
+      "Secret Blizzard",
+      "BELUGASTURGEON"
+    ],
+    "ttps": [
+      "T1049",
+      "T1588.001",
+      "T1555.004",
+      "T1546.013",
+      "T1189",
+      "T1587.001",
+      "T1055.001",
+      "T1570",
+      "T1213.006",
+      "T1102",
+      "T1112",
+      "T1566.002",
+      "T1584.004",
+      "T1018",
+      "T1059.006",
+      "T1553.006",
+      "T1140",
+      "T1564.012",
+      "T1087.001",
+      "T1057"
+    ],
+    "target_industries": []
+  },
+  "ioc_enrichment": {
+    "192.168.1.5": {
+      "type": "ip",
+      "risk_score": 0,
+      "tags": [
+        "internal",
+        "lab"
+      ],
+      "geo": "Internal Network",
+      "source": "local_custom",
+      "is_malicious": false
+    },
+    "59.64.129.102": {
+      "type": "ip",
+      "risk_score": 80,
+      "tags": [
+        "Attacker",
+        "BruteForce",
+        "SSH",
+        "模拟攻击"
+      ],
+      "geo": "Simulated Attacker",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "45.33.2.1": {
+      "type": "ip",
+      "risk_score": 90,
+      "tags": [
+        "C2",
+        "Botnet",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "198.51.100.23": {
+      "type": "ip",
+      "risk_score": 78,
+      "tags": [
+        "Exfiltration",
+        "HTTP-POST",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "192.168.1.20": {
+      "type": "ip",
+      "risk_score": 0,
+      "tags": [
+        "internal",
+        "lab"
+      ],
+      "geo": "Internal Network",
+      "source": "local_custom",
+      "is_malicious": false
+    }
+  }
+}

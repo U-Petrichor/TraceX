@@ -1,0 +1,250 @@
+
+/* Modal Updates */
+.modal-content {
+  width: min(900px, 92vw);
+  padding: 32px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  animation: modalPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+@keyframes modalPop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.modal-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: "Noto Serif SC", serif;
+  background: linear-gradient(135deg, var(--ink-900), var(--ink-700));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.modal-close {
+  background: rgba(0,0,0,0.05);
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink-500);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  background: rgba(0,0,0,0.1);
+  color: var(--ink-900);
+  transform: rotate(90deg);
+}
+
+.modal-body {
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* Detail View Layout */
+.detail-section {
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.detail-section h3 {
+  font-size: 1rem;
+  margin-bottom: 20px;
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-section h3::before {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 16px;
+  background: var(--ember);
+  border-radius: 2px;
+}
+
+.kv-list {
+  display: grid;
+  gap: 16px;
+}
+
+.kv-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.kv-item:last-child {
+  border-bottom: none;
+}
+
+.kv-key {
+  color: var(--ink-500);
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.kv-val {
+  font-weight: 600;
+  text-align: right;
+  color: var(--ink-800);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+/* NoDoze */
+.nodoze-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.8), transparent 70%);
+  padding: 20px 0;
+  min-height: 240px;
+}
+
+.nodoze-desc {
+  margin-top: -10px;
+  font-size: 0.9rem;
+  color: var(--ink-500);
+  line-height: 1.6;
+  max-width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ATLAS Chain Timeline */
+.atlas-chain {
+  position: relative;
+  padding-left: 32px;
+  display: grid;
+  gap: 24px;
+}
+
+.atlas-chain::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(0, 166, 166, 0.3), rgba(255, 122, 24, 0.3));
+  border-radius: 2px;
+}
+
+.atlas-step {
+  position: relative;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  animation: slideIn 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: transform 0.2s;
+}
+
+.atlas-step:hover {
+  transform: translateX(4px) scale(1.02);
+  background: white;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+  z-index: 1;
+}
+
+.atlas-step::before {
+  content: "";
+  position: absolute;
+  left: -27px;
+  top: 20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  border: 3px solid var(--ink-500);
+  z-index: 2;
+  box-shadow: 0 0 0 4px rgba(255,255,255,0.8);
+  transition: all 0.3s;
+}
+
+.atlas-step.current {
+  border-color: rgba(255, 122, 24, 0.3);
+  background: linear-gradient(135deg, #fffbf7, #ffffff);
+}
+
+.atlas-step.current::before {
+  border-color: var(--ember);
+  background: var(--ember);
+  box-shadow: 0 0 0 6px rgba(255, 122, 24, 0.2);
+  transform: scale(1.2);
+}
+
+.atlas-phase {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--ink-500);
+  margin-bottom: 6px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.atlas-action {
+  font-weight: 700;
+  color: var(--ink-900);
+  font-size: 1.05rem;
+  margin-bottom: 8px;
+}
+
+.atlas-time {
+  font-size: 0.8rem;
+  color: var(--ink-500);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(0,0,0,0.05);
+  padding-top: 8px;
+}
+
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

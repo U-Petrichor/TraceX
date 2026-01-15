@@ -1,0 +1,197 @@
+{
+  "simulation": {
+    "name": "LuminousMoth",
+    "mode": "直接 TTP",
+    "event_count": 10,
+    "node_count": 12,
+    "edge_count": 13
+  },
+  "attack_chain_signature": [
+    "AUTHENTICATION_LOGIN",
+    "FILE_WRITE",
+    "NETWORK_Outbound",
+    "PROCESS"
+  ],
+  "attack_chain_structure": [
+    "[host] PC-1 --host_network--> [network] 45.33.2.1",
+    "[host] PC-1 --host_auth--> [network] 45.33.2.1",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_network--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_auth--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1005.txt",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1553.002.txt",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_network--> [network] https:198.51.100.23:443",
+    "[host] PC-1 --host_auth--> [network] https:198.51.100.23:443",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1091.txt"
+  ],
+  "ttp_attribution": {
+    "suspected_group": "LuminousMoth",
+    "confidence": 0.807,
+    "matched_ttps": [
+      "T1560",
+      "T1587.001",
+      "T1030",
+      "T1083",
+      "T1005",
+      "T1112",
+      "T1574.001",
+      "T1553.002",
+      "T1036.005",
+      "T1091"
+    ],
+    "jaccard_similarity": 0.357,
+    "recall": 1.0,
+    "top_matches": [
+      {
+        "group": "LuminousMoth",
+        "score": 0.807,
+        "matched_ttps": [
+          "T1560",
+          "T1587.001",
+          "T1030",
+          "T1083",
+          "T1005",
+          "T1112",
+          "T1574.001",
+          "T1553.002",
+          "T1036.005",
+          "T1091"
+        ]
+      },
+      {
+        "group": "Patchwork",
+        "score": 0.538,
+        "matched_ttps": [
+          "T1560",
+          "T1083",
+          "T1005",
+          "T1112",
+          "T1574.001",
+          "T1553.002",
+          "T1036.005"
+        ]
+      },
+      {
+        "group": "APT41",
+        "score": 0.515,
+        "matched_ttps": [
+          "T1030",
+          "T1083",
+          "T1005",
+          "T1112",
+          "T1574.001",
+          "T1553.002",
+          "T1036.005"
+        ]
+      },
+      {
+        "group": "Lazarus Group",
+        "score": 0.512,
+        "matched_ttps": [
+          "T1560",
+          "T1587.001",
+          "T1083",
+          "T1005",
+          "T1574.001",
+          "T1553.002",
+          "T1036.005"
+        ]
+      },
+      {
+        "group": "menuPass",
+        "score": 0.456,
+        "matched_ttps": [
+          "T1560",
+          "T1083",
+          "T1005",
+          "T1574.001",
+          "T1553.002",
+          "T1036.005"
+        ]
+      }
+    ]
+  },
+  "apt_profile": {
+    "name": "LuminousMoth",
+    "aliases": [
+      "LuminousMoth"
+    ],
+    "ttps": [
+      "T1105",
+      "T1608.001",
+      "T1564.001",
+      "T1587.001",
+      "T1574.001",
+      "T1547.001",
+      "T1557.002",
+      "T1608.004",
+      "T1560",
+      "T1566.002",
+      "T1553.002",
+      "T1567.002",
+      "T1030",
+      "T1041",
+      "T1083",
+      "T1071.001",
+      "T1036.005",
+      "T1053.005",
+      "T1608.005",
+      "T1204.001"
+    ],
+    "target_industries": []
+  },
+  "ioc_enrichment": {
+    "59.64.129.102": {
+      "type": "ip",
+      "risk_score": 80,
+      "tags": [
+        "Attacker",
+        "BruteForce",
+        "SSH",
+        "模拟攻击"
+      ],
+      "geo": "Simulated Attacker",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "45.33.2.1": {
+      "type": "ip",
+      "risk_score": 90,
+      "tags": [
+        "C2",
+        "Botnet",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "198.51.100.23": {
+      "type": "ip",
+      "risk_score": 78,
+      "tags": [
+        "Exfiltration",
+        "HTTP-POST",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "203.0.113.99": {
+      "type": "ip",
+      "risk_score": 65,
+      "tags": [
+        "Scanner",
+        "Recon",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": false
+    }
+  }
+}

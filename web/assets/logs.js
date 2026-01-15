@@ -82,22 +82,21 @@
 
   const load = async () => {
     const queryPart = state.query ? `&query=${encodeURIComponent(state.query)}` : "";
-    const data = await fetchJson(
-      `/api/logs?page=${state.page}&size=${state.size}${queryPart}`,
-      sample.logs
-    );
+    const data = await fetchJson(`/api/logs?page=${state.page}&size=${state.size}${queryPart}`);
+    const logs = data && !data.error ? data.data || [] : [];
+    const total = data && !data.error ? data.total || 0 : 0;
 
     if (els.totalLabel) {
-      els.totalLabel.textContent = `总计 ${formatNumber(data.total || 0)}`;
+      els.totalLabel.textContent = `总计 ${formatNumber(total)}`;
     }
-    renderRows(data.data || []);
-    updatePagination(data.total || 0);
+    renderRows(logs);
+    updatePagination(total);
 
-    if (els.detailsPre && !els.detailsPre.textContent && data.data && data.data[0]) {
-      els.detailsPre.textContent = JSON.stringify(data.data[0], null, 2);
+    if (els.detailsPre && !els.detailsPre.textContent && logs && logs[0]) {
+      els.detailsPre.textContent = JSON.stringify(logs[0], null, 2);
       if (els.detailsMeta) {
-        els.detailsMeta.textContent = `${safeGet(data.data[0], "event.dataset", "-")} | ${formatTime(
-          data.data[0]["@timestamp"]
+        els.detailsMeta.textContent = `${safeGet(logs[0], "event.dataset", "-")} | ${formatTime(
+          logs[0]["@timestamp"]
         )}`;
       }
     }

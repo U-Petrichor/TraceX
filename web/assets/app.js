@@ -16,7 +16,7 @@
       return saved;
     }
     if (window.location.protocol === "file:") {
-      return "http://localhost:8000";
+      return "http://localhost:8010";
     }
     return window.location.origin;
   })();
@@ -115,6 +115,231 @@
       page: 1,
       size: 3,
     },
+    aptReport: {
+      simulation: {
+        name: "APT28",
+        mode: "直接 TTP",
+        event_count: 10,
+        node_count: 12,
+        edge_count: 13,
+      },
+      attack_chain_signature: ["AUTHENTICATION_LOGIN", "FILE_WRITE", "NETWORK_Outbound", "PROCESS"],
+      attack_chain_structure: [
+        { source_type: "host", source: "PC-1", relation: "host_network", target_type: "network", target: "45.33.2.1" },
+        { source_type: "host", source: "PC-1", relation: "host_auth", target_type: "network", target: "45.33.2.1" },
+        {
+          source_type: "process",
+          source: "Parent:3000",
+          relation: "spawned",
+          target_type: "process",
+          target: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        },
+        {
+          source_type: "process",
+          source: "Parent:3000",
+          relation: "spawned",
+          target_type: "process",
+          target: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_network",
+          target_type: "network",
+          target: "https:45.33.2.1:443",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_auth",
+          target_type: "network",
+          target: "https:45.33.2.1:443",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_file",
+          target_type: "file",
+          target: "C:\\Users\\Public\\Documents\\T1110.003.txt",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_file",
+          target_type: "file",
+          target: "C:\\Users\\Public\\Documents\\T1036.005.txt",
+        },
+        {
+          source_type: "process",
+          source: "Parent:3000",
+          relation: "spawned",
+          target_type: "process",
+          target: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_network",
+          target_type: "network",
+          target: "https:198.51.100.23:443",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_auth",
+          target_type: "network",
+          target: "https:198.51.100.23:443",
+        },
+        {
+          source_type: "process",
+          source: "Parent:3000",
+          relation: "spawned",
+          target_type: "process",
+          target: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        },
+        {
+          source_type: "host",
+          source: "PC-1",
+          relation: "host_file",
+          target_type: "file",
+          target: "C:\\Users\\Public\\Documents\\T1021.002.txt",
+        },
+      ],
+      ttp_attribution: {
+        suspected_group: "APT28",
+        confidence: 0.733,
+        matched_ttps: [
+          "T1036.005",
+          "T1021.002",
+          "T1078",
+          "T1030",
+          "T1546.015",
+          "T1037.001",
+          "T1596",
+          "T1110.003",
+          "T1598",
+          "T1584.008",
+        ],
+        jaccard_similarity: 0.11,
+        recall: 1.0,
+        top_matches: [
+          {
+            group: "APT28",
+            score: 0.733,
+            matched_ttps: [
+              "T1036.005",
+              "T1021.002",
+              "T1078",
+              "T1030",
+              "T1546.015",
+              "T1037.001",
+              "T1596",
+              "T1110.003",
+              "T1598",
+              "T1584.008",
+            ],
+          },
+          {
+            group: "Chimera",
+            score: 0.298,
+            matched_ttps: ["T1078", "T1036.005", "T1021.002", "T1110.003"],
+          },
+          {
+            group: "APT41",
+            score: 0.294,
+            matched_ttps: ["T1078", "T1036.005", "T1021.002", "T1030"],
+          },
+          {
+            group: "Lazarus Group",
+            score: 0.292,
+            matched_ttps: ["T1078", "T1036.005", "T1021.002", "T1110.003"],
+          },
+          {
+            group: "Play",
+            score: 0.237,
+            matched_ttps: ["T1078", "T1030", "T1021.002"],
+          },
+        ],
+      },
+      apt_profile: {
+        name: "APT28",
+        aliases: [
+          "APT28",
+          "IRON TWILIGHT",
+          "SNAKEMACKEREL",
+          "Swallowtail",
+          "Group 74",
+          "Sednit",
+          "Sofacy",
+          "Pawn Storm",
+          "Fancy Bear",
+          "STRONTIUM",
+          "Tsar Team",
+          "Threat Group-4127",
+          "TG-4127",
+          "Forest Blizzard",
+          "FROZENLAKE",
+          "GruesomeLarch",
+        ],
+        ttps: [
+          "T1584.008",
+          "T1021.002",
+          "T1005",
+          "T1068",
+          "T1037.001",
+          "T1119",
+          "T1583.001",
+          "T1564.003",
+          "T1090.003",
+          "T1564.001",
+          "T1003.003",
+          "T1056.001",
+          "T1092",
+          "T1559.002",
+          "T1057",
+          "T1547.001",
+          "T1546.015",
+          "T1025",
+          "T1071.001",
+          "T1204.001",
+        ],
+        target_industries: [],
+      },
+      ioc_enrichment: {
+        "45.33.2.1": {
+          type: "ip",
+          risk_score: 90,
+          tags: ["C2", "Botnet", "模拟攻击"],
+          geo: "Lab",
+          source: "local_custom",
+          is_malicious: true,
+        },
+        "59.64.129.102": {
+          type: "ip",
+          risk_score: 80,
+          tags: ["Attacker", "BruteForce", "SSH", "模拟攻击"],
+          geo: "Simulated Attacker",
+          source: "local_custom",
+          is_malicious: true,
+        },
+        "203.0.113.99": {
+          type: "ip",
+          risk_score: 65,
+          tags: ["Scanner", "Recon", "模拟攻击"],
+          geo: "Lab",
+          source: "local_custom",
+          is_malicious: false,
+        },
+        "198.51.100.23": {
+          type: "ip",
+          risk_score: 78,
+          tags: ["Exfiltration", "HTTP-POST", "模拟攻击"],
+          geo: "Lab",
+          source: "local_custom",
+          is_malicious: true,
+        },
+      },
+    },
   };
 
   const safeGet = (obj, path, fallback = "-") => {
@@ -196,7 +421,10 @@
     } catch (err) {
       state.offline = true;
       setStatus("离线演示", "offline");
-      return fallback;
+      if (fallback !== undefined) {
+        return fallback;
+      }
+      return { error: err?.message || "Network error" };
     }
   };
 

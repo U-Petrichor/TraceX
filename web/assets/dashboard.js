@@ -29,7 +29,7 @@
   const updateStats = (stats) => {
     const total = stats?.total_events ?? 0;
     const threats = stats?.threat_count ?? 0;
-    const ratio = total > 0 ? ((threats / total) * 100).toFixed(1) : "0.0";
+    const ratio = total > 0 ? ((threats / total) * 100).toFixed(2) : "0.0"; // Increased precision to 2 decimal places
 
     if (els.totalEvents) {
       els.totalEvents.textContent = formatNumber(total);
@@ -149,6 +149,13 @@
       return;
     }
     els.signalList.innerHTML = "";
+    if (!logs.length) {
+      const empty = document.createElement("div");
+      empty.className = "list-item";
+      empty.textContent = "暂无可用信号";
+      els.signalList.appendChild(empty);
+      return;
+    }
     logs.forEach((log) => {
       const item = document.createElement("div");
       item.className = "list-item";
@@ -167,15 +174,21 @@
 
   const load = async () => {
     const hours = parseInt(els.rangeSelect?.value || "24", 10);
-    const stats = await fetchJson(`/api/stats?hours=${hours}`, sample.stats);
-    const trend = await fetchJson(`/api/trend?hours=${hours}&interval=1h`, sample.trend);
-    const attacks = await fetchJson(`/api/attacks?hours=${hours}&limit=60`, sample.attacks);
-    const logs = await fetchJson(`/api/logs?page=1&size=6`, sample.logs);
+    const stats = await fetchJson(`/api/stats?hours=${hours}`);
+    const trend = await fetchJson(`/api/trend?hours=${hours}&interval=1h`);
+    const attacks = await fetchJson(`/api/attacks?hours=${hours}&limit=60`);
+    const logs = await fetchJson(`/api/logs?page=1&size=6`);
 
-    updateStats(stats);
-    updateTrend(trend.data || []);
-    updateTactics(attacks.attacks || []);
-    updateSignals(logs.data || []);
+    const statsPayload =
+      stats && !stats.error ? stats : { total_events: 0, threat_count: 0, period_hours: hours };
+    const trendPayload = trend && !trend.error ? trend.data || [] : [];
+    const attacksPayload = attacks && !attacks.error ? attacks.attacks || [] : [];
+    const logsPayload = logs && !logs.error ? logs.data || [] : [];
+
+    updateStats(statsPayload);
+    updateTrend(trendPayload);
+    updateTactics(attacksPayload);
+    updateSignals(logsPayload);
   };
 
   document.addEventListener("DOMContentLoaded", () => {

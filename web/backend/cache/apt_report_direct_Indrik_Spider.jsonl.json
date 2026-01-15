@@ -1,0 +1,203 @@
+{
+  "simulation": {
+    "name": "Indrik_Spider",
+    "mode": "直接 TTP",
+    "event_count": 10,
+    "node_count": 12,
+    "edge_count": 13
+  },
+  "attack_chain_signature": [
+    "AUTHENTICATION_LOGIN",
+    "FILE_WRITE",
+    "NETWORK_Outbound",
+    "PROCESS"
+  ],
+  "attack_chain_structure": [
+    "[host] PC-1 --host_network--> [network] 45.33.2.1",
+    "[host] PC-1 --host_auth--> [network] 45.33.2.1",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_network--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_auth--> [network] https:45.33.2.1:443",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1587.001.txt",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1486.txt",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_network--> [network] https:198.51.100.23:443",
+    "[host] PC-1 --host_auth--> [network] https:198.51.100.23:443",
+    "[process] Parent:3000 --spawned--> [process] C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "[host] PC-1 --host_file--> [file] C:\\Users\\Public\\Documents\\T1484.001.txt"
+  ],
+  "ttp_attribution": {
+    "suspected_group": "Indrik Spider",
+    "confidence": 0.791,
+    "matched_ttps": [
+      "T1059.001",
+      "T1036.005",
+      "T1552.001",
+      "T1021.001",
+      "T1587.001",
+      "T1047",
+      "T1018",
+      "T1078",
+      "T1486",
+      "T1484.001"
+    ],
+    "jaccard_similarity": 0.303,
+    "recall": 1.0,
+    "top_matches": [
+      {
+        "group": "Indrik Spider",
+        "score": 0.791,
+        "matched_ttps": [
+          "T1059.001",
+          "T1036.005",
+          "T1552.001",
+          "T1021.001",
+          "T1587.001",
+          "T1047",
+          "T1018",
+          "T1078",
+          "T1486",
+          "T1484.001"
+        ]
+      },
+      {
+        "group": "APT41",
+        "score": 0.589,
+        "matched_ttps": [
+          "T1059.001",
+          "T1036.005",
+          "T1021.001",
+          "T1047",
+          "T1018",
+          "T1078",
+          "T1486",
+          "T1484.001"
+        ]
+      },
+      {
+        "group": "FIN7",
+        "score": 0.52,
+        "matched_ttps": [
+          "T1059.001",
+          "T1036.005",
+          "T1021.001",
+          "T1587.001",
+          "T1047",
+          "T1078",
+          "T1486"
+        ]
+      },
+      {
+        "group": "OilRig",
+        "score": 0.517,
+        "matched_ttps": [
+          "T1059.001",
+          "T1036.005",
+          "T1552.001",
+          "T1021.001",
+          "T1587.001",
+          "T1047",
+          "T1078"
+        ]
+      },
+      {
+        "group": "Sandworm Team",
+        "score": 0.516,
+        "matched_ttps": [
+          "T1059.001",
+          "T1036.005",
+          "T1587.001",
+          "T1047",
+          "T1018",
+          "T1078",
+          "T1486"
+        ]
+      }
+    ]
+  },
+  "apt_profile": {
+    "name": "Indrik Spider",
+    "aliases": [
+      "Indrik Spider",
+      "Evil Corp",
+      "Manatee Tempest",
+      "DEV-0243",
+      "UNC2165"
+    ],
+    "ttps": [
+      "T1078.002",
+      "T1558.003",
+      "T1112",
+      "T1555.005",
+      "T1078",
+      "T1590",
+      "T1552.001",
+      "T1204.002",
+      "T1567.002",
+      "T1059.003",
+      "T1074.001",
+      "T1059.007",
+      "T1021.004",
+      "T1047",
+      "T1105",
+      "T1036.005",
+      "T1007",
+      "T1584.004",
+      "T1585.002",
+      "T1070.001"
+    ],
+    "target_industries": []
+  },
+  "ioc_enrichment": {
+    "59.64.129.102": {
+      "type": "ip",
+      "risk_score": 80,
+      "tags": [
+        "Attacker",
+        "BruteForce",
+        "SSH",
+        "模拟攻击"
+      ],
+      "geo": "Simulated Attacker",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "45.33.2.1": {
+      "type": "ip",
+      "risk_score": 90,
+      "tags": [
+        "C2",
+        "Botnet",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    },
+    "203.0.113.99": {
+      "type": "ip",
+      "risk_score": 65,
+      "tags": [
+        "Scanner",
+        "Recon",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": false
+    },
+    "198.51.100.23": {
+      "type": "ip",
+      "risk_score": 78,
+      "tags": [
+        "Exfiltration",
+        "HTTP-POST",
+        "模拟攻击"
+      ],
+      "geo": "Lab",
+      "source": "local_custom",
+      "is_malicious": true
+    }
+  }
+}

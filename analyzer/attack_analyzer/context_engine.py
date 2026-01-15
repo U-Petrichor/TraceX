@@ -94,7 +94,37 @@ class ContextEngine:
                 if score >= min_score or 'cowrie' in str(source.get('event', {}).get('dataset', '')):
                     if 'threat' not in source or source['threat'] is None:
                         source['threat'] = {}
-                    source['threat']['confidence'] = max(score, 50) / 100.0
+                    if 'detection' not in source or source['detection'] is None:
+                        source['detection'] = {}
+
+                    # 1. Backfill Severity
+                    source['detection']['severity'] = threat_analysis.get('severity', 'medium')
+
+                    # 2. Backfill Confidence (Allow Low confidence)
+                    source['threat']['confidence'] = max(score, 10) / 100.0
+                    
+                    # 3. Backfill Tactic (If missing)
+                    if not source['threat'].get('tactic', {}).get('name'):
+                        reasons_str = " ".join(threat_analysis.get('reasons', [])).lower()
+                        tactic_name = "Initial Access" # Default fallback
+                        
+                        if "authentication" in reasons_str or "login" in reasons_str or "bruteforce" in reasons_str:
+                            tactic_name = "Credential Access"
+                        elif "webshell" in reasons_str or "persistence" in reasons_str:
+                            tactic_name = "Persistence"
+                        elif "shell" in reasons_str or "execution" in reasons_str or "powershell" in reasons_str or "process" in reasons_str:
+                            tactic_name = "Execution"
+                        elif "honeypot" in reasons_str:
+                            tactic_name = "Collection"
+                        elif "download" in reasons_str or "curl" in reasons_str or "wget" in reasons_str:
+                            tactic_name = "Command and Control"
+                        elif "scan" in reasons_str or "recon" in reasons_str:
+                            tactic_name = "Reconnaissance"
+                        
+                        if 'tactic' not in source['threat']:
+                             source['threat']['tactic'] = {}
+                        source['threat']['tactic']['name'] = tactic_name
+
                     seeds.append(SafeEventWrapper(source))
             return seeds
         except Exception as e:
@@ -151,6 +181,29 @@ class ContextEngine:
                 if self._get_val(event, 'source.ip') not in ['127.0.0.1', '::1', 'localhost']:
                     score = max(score, 60)
                     reasons.append(f"Authentication: Root Remote Login from {self._get_val(event, 'source.ip')}")
+
+        # 4.5 蜜罐特判 (优化评分分布)
+        if 'cowrie' in str(dataset).lower():
+            action = self._get_val(event, 'event.action', '')
+            outcome = self._get_val(event, 'event.outcome', '')
+            
+            if action == 'input':
+                # 输入命令：高危，具体危害由启发式进一步加分
+                honeypot_score = 75
+                reasons.append("HIGH: Honeypot Command Execution")
+            elif action == 'login':
+                if outcome == 'success':
+                    honeypot_score = 60
+                    reasons.append("MEDIUM: Honeypot Login Success")
+                else:
+                    honeypot_score = 40
+                    reasons.append("LOW: Honeypot Login Attempt")
+            else:
+                # 其他交互（连接、断开等）：低危
+                honeypot_score = 25
+                reasons.append("LOW: Honeypot Interaction")
+            
+            score = max(score, honeypot_score)
 
         # 5. 补全：启发式规则 (处理失败的 9 个测试场景)
         h_score, h_reasons = self._check_heuristics(event)
