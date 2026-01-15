@@ -1,6 +1,10 @@
+"""
+模式 1: 直接生成带 TTP 标签的事件
+TTP 直接写入 threat.technique.id，跳过 Sigma 检测
+用于快速验证归因逻辑
+"""
 import json
 import sys
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -11,14 +15,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from collector.common.schema import UnifiedEvent
 
 
+# ========== APT 组织 TTP 清单 (MITRE STIX 真实数据) ==========
 APT_TTPS = {
     "APT28": ["T1584.008", "T1078", "T1598", "T1030", "T1110.003", "T1036.005", "T1596", "T1037.001", "T1546.015", "T1021.002"],
     "APT29": ["T1070.004", "T1037.004", "T1199", "T1078", "T1047", "T1059.001", "T1568", "T1090.002", "T1070.006", "T1587.001"],
     "FIN7": ["T1078", "T1027.016", "T1047", "T1059.001", "T1572", "T1021.001", "T1674", "T1569.002", "T1102.002", "T1486"],
-    "Indrik Spider": ["T1078", "T1047", "T1059.001", "T1021.001", "T1587.001", "T1486", "T1036.005", "T1552.001", "T1018", "T1484.001"],
+    "Indrik_Spider": ["T1078", "T1047", "T1059.001", "T1021.001", "T1587.001", "T1486", "T1036.005", "T1552.001", "T1018", "T1484.001"],
     "LuminousMoth": ["T1030", "T1587.001", "T1036.005", "T1574.001", "T1005", "T1553.002", "T1560", "T1112", "T1083", "T1091"],
 }
 
+# IOC 来源 (会在 IOC 富化时命中本地库)
 IOC_SOURCES = [
     ("59.64.129.102", "45.33.2.1"),
     ("203.0.113.99", "198.51.100.23"),
@@ -33,6 +39,7 @@ def _build_event(base_time, offset_s, category, ttp_id, host="PC-1", src_ip=None
     event.timestamp = (base_time + timedelta(seconds=offset_s)).isoformat() + "Z"
     event.event.category = category
     event.event.dataset = "windows"
+    event.host.name = host
 
     if category == "authentication":
         event.event.action = "login"
@@ -64,6 +71,7 @@ def _build_event(base_time, offset_s, category, ttp_id, host="PC-1", src_ip=None
         event.file.name = f"{ttp_id}.txt"
         event.file.extension = "txt"
 
+    # 直接写入 TTP
     event.threat.technique.id = ttp_id
     event.threat.technique.name = ""
     return event.to_dict()
@@ -80,12 +88,12 @@ def generate_all(output_dir: Path):
             src_ip, dst_ip = IOC_SOURCES[i % len(IOC_SOURCES)]
             events.append(_build_event(base_time, i + 1, category, ttp, src_ip=src_ip, dst_ip=dst_ip))
 
-        file_path = output_dir / f"{apt_name.replace(' ', '_')}.jsonl"
+        file_path = output_dir / f"{apt_name}.jsonl"
         with file_path.open("w", encoding="utf-8") as f:
             for e in events:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")
-        print(f"Generated {len(events)} events -> {file_path}")
+        print(f"[直接TTP] 生成 {len(events)} 事件 -> {file_path}")
 
 
 if __name__ == "__main__":
-    generate_all(Path(__file__).resolve().parent / "apt_events")
+    generate_all(Path(__file__).resolve().parent / "apt_events" / "direct")
