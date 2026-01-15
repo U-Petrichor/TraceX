@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional
 sys.path.append('/root')
 
 from fastapi import FastAPI, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from TraceX.collector.common.es_client import ESClient
 from TraceX.analyzer.attack_analyzer.context_engine import ContextEngine
@@ -26,6 +28,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files
+current_dir = os.path.dirname(os.path.abspath(__file__))
+web_root = os.path.dirname(current_dir)
+assets_dir = os.path.join(web_root, "assets")
+
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+@app.get("/")
+async def read_root():
+    return FileResponse(os.path.join(web_root, "index.html"))
+
+@app.get("/{page_name}.html")
+async def read_page(page_name: str):
+    # Security check: only allow alphanumeric chars to prevent directory traversal
+    if not page_name.replace("_", "").isalnum():
+        return {"error": "Invalid page name"}, 400
+    
+    file_path = os.path.join(web_root, f"{page_name}.html")
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return {"error": "Page not found"}, 404
 
 # Initialize clients
 es_client = ESClient(hosts=["http://localhost:9200"])

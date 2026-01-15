@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TraceX Atlas - 日志</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script src="assets/app.js" defer></script>
+    <script src="assets/logs.js" defer></script>
+  </head>
+  <body data-page="logs">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>TraceX Atlas</span>
+      </div>
+      <nav class="nav">
+        <a href="index.html" data-nav="dashboard">总览</a>
+        <a href="threats.html" data-nav="threats">威胁</a>
+        <a href="graph.html" data-nav="graph">攻击图谱</a>
+        <a href="logs.html" data-nav="logs">日志</a>
+      </nav>
+      <div class="top-controls">
+        <div class="status-pill" data-tone="live">
+          <span class="status-dot"></span>
+          <span class="js-status">在线</span>
+        </div>
+        <button class="button secondary" data-toggle-panel aria-expanded="false">数据源</button>
+      </div>
+      <div class="data-panel" data-panel hidden>
+        <div class="panel-head">
+          <div class="panel-title">API 地址</div>
+          <button class="panel-close" type="button" data-panel-close>关闭</button>
+        </div>
+        <div class="input-group">
+          <input class="input" id="apiBaseInput" type="text" placeholder="http://localhost:8000" />
+          <button class="button" id="apiBaseSave">保存</button>
+        </div>
+        <div class="inline-note">提示：使用 FastAPI 服务地址或反向代理。</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div>
+          <div class="tag">日志控制台</div>
+          <h1 class="hero-title">一处检索全量数据源。</h1>
+          <p class="hero-subtitle">Auditd、Zeek 与蜜罐信号统一检索。</p>
+        </div>
+        <div class="input-group">
+          <input class="input" id="searchInput" type="text" placeholder="搜索日志 / IP / 命令" />
+          <button class="button" id="searchBtn">搜索</button>
+        </div>
+      </section>
+
+      <section class="grid cols-2">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">事件流</div>
+            <span class="inline-note" id="totalLabel">总计 0</span>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>数据集</th>
+                  <th>内容</th>
+                  <th>主机</th>
+                  <th>来源</th>
+                </tr>
+              </thead>
+              <tbody id="logTableBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <button class="button secondary" id="prevPage">上一页</button>
+            <div class="inline-note" id="pageLabel">第 1 页</div>
+            <button class="button secondary" id="nextPage">下一页</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">日志详情</div>
+            <span class="inline-note" id="detailMeta">选择一行查看</span>
+          </div>
+          <pre class="mono log-details" id="logDetails"></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>TraceX Atlas 可视化</div>
+      <div class="mono">日志控制台视图</div>
+    </footer>
+  </body>
+</html>

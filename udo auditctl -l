@@ -1,0 +1,22 @@
+[0;1;32m●[0m auditd.service - Security Auditing Service
+     Loaded: loaded (/lib/systemd/system/auditd.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Mon 2026-01-12 20:06:36 CST; 2 days ago
+       Docs: man:auditd(8)
+             https://github.com/linux-audit/audit-documentation
+   Main PID: 75826 (auditd)
+      Tasks: 2 (limit: 8631)
+     Memory: 40.2M
+        CPU: 1h 23min 59.682s
+     CGroup: /system.slice/auditd.service
+             └─75826 /sbin/auditd
+
+Jan 15 06:24:26 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:29 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:31 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:34 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:36 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:38 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:41 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:43 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:46 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m
+Jan 15 06:24:48 iZ2ze082hzl5s9xfijazalZ auditd[75826]: [0;1;39m[0;1;31m[0;1;39mAudit daemon rotating log files[0m

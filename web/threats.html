@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TraceX Atlas - 威胁中控</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+    <script src="assets/app.js" defer></script>
+    <script src="assets/threats.js" defer></script>
+  </head>
+  <body data-page="threats">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>TraceX Atlas</span>
+      </div>
+      <nav class="nav">
+        <a href="index.html" data-nav="dashboard">总览</a>
+        <a href="threats.html" data-nav="threats">威胁</a>
+        <a href="graph.html" data-nav="graph">攻击图谱</a>
+        <a href="logs.html" data-nav="logs">日志</a>
+      </nav>
+      <div class="top-controls">
+        <div class="status-pill" data-tone="live">
+          <span class="status-dot"></span>
+          <span class="js-status">在线</span>
+        </div>
+        <button class="button secondary" data-toggle-panel aria-expanded="false">数据源</button>
+      </div>
+      <div class="data-panel" data-panel hidden>
+        <div class="panel-head">
+          <div class="panel-title">API 地址</div>
+          <button class="panel-close" type="button" data-panel-close>关闭</button>
+        </div>
+        <div class="input-group">
+          <input class="input" id="apiBaseInput" type="text" placeholder="http://localhost:8000" />
+          <button class="button" id="apiBaseSave">保存</button>
+        </div>
+        <div class="inline-note">提示：使用 FastAPI 服务地址或反向代理。</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div>
+          <div class="tag">威胁中控</div>
+          <h1 class="hero-title">实时对手信号，分级聚合。</h1>
+          <p class="hero-subtitle">按战术、严重度与路径优先级排序关键告警。</p>
+        </div>
+        <div class="input-group">
+          <select class="select" id="rangeSelect">
+            <option value="6">最近 6 小时</option>
+            <option value="12">最近 12 小时</option>
+            <option value="24" selected>最近 24 小时</option>
+            <option value="72">最近 72 小时</option>
+          </select>
+          <select class="select" id="limitSelect">
+            <option value="20">20 条告警</option>
+            <option value="40">40 条告警</option>
+            <option value="60" selected>60 条告警</option>
+            <option value="100">100 条告警</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="grid cols-3">
+        <div class="card" data-delay="1">
+          <div class="card-header">
+            <div class="card-title">活跃告警</div>
+            <span class="badge danger">实时</span>
+          </div>
+          <div class="card-value" id="attackCount">--</div>
+          <div class="card-sub">范围内信号</div>
+        </div>
+        <div class="card" data-delay="2">
+          <div class="card-header">
+            <div class="card-title">高危告警</div>
+            <span class="badge warn">优先</span>
+          </div>
+          <div class="card-value" id="highCount">--</div>
+          <div class="card-sub">立即处置</div>
+        </div>
+        <div class="card" data-delay="3">
+          <div class="card-header">
+            <div class="card-title">主要战术</div>
+            <span class="badge">重点</span>
+          </div>
+          <div class="card-value" id="topTactic">--</div>
+          <div class="card-sub">主导模式</div>
+        </div>
+      </section>
+
+      <section class="grid cols-2">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">严重度分布</div>
+            <span class="inline-note">告警态势</span>
+          </div>
+          <div id="severityChart" class="chart"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">战术分布</div>
+            <span class="inline-note">MITRE 覆盖</span>
+          </div>
+          <div id="tacticPie" class="chart"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">威胁节奏</div>
+          <span class="inline-note">每小时信号</span>
+        </div>
+        <div id="timelineChart" class="chart"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">威胁队列</div>
+          <span class="inline-note">按评分排序</span>
+        </div>
+        <div class="grid cols-3" id="threatGrid"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>TraceX Atlas 可视化</div>
+      <div class="mono">威胁中控视图</div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TraceX Atlas - 攻击图谱</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+    <script src="assets/app.js" defer></script>
+    <script src="assets/graph.js" defer></script>
+  </head>
+  <body data-page="graph">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>TraceX Atlas</span>
+      </div>
+      <nav class="nav">
+        <a href="index.html" data-nav="dashboard">总览</a>
+        <a href="threats.html" data-nav="threats">威胁</a>
+        <a href="graph.html" data-nav="graph">攻击图谱</a>
+        <a href="logs.html" data-nav="logs">日志</a>
+      </nav>
+      <div class="top-controls">
+        <div class="status-pill" data-tone="live">
+          <span class="status-dot"></span>
+          <span class="js-status">在线</span>
+        </div>
+        <button class="button secondary" data-toggle-panel aria-expanded="false">数据源</button>
+      </div>
+      <div class="data-panel" data-panel hidden>
+        <div class="panel-head">
+          <div class="panel-title">API 地址</div>
+          <button class="panel-close" type="button" data-panel-close>关闭</button>
+        </div>
+        <div class="input-group">
+          <input class="input" id="apiBaseInput" type="text" placeholder="http://localhost:8000" />
+          <button class="button" id="apiBaseSave">保存</button>
+        </div>
+        <div class="inline-note">提示：使用 FastAPI 服务地址或反向代理。</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="page-head">
+        <div>
+          <div class="tag">攻击图谱</div>
+          <h1 class="hero-title">将横向移动可视化为实时图谱</h1>
+          <p class="hero-subtitle">节点与连线仅来自高价值事件</p>
+        </div>
+        <div class="input-group">
+          <select class="select" id="rangeSelect" aria-label="时间范围">
+            <option value="6">最近 6 小时</option>
+            <option value="12">最近 12 小时</option>
+            <option value="24" selected>最近 24 小时</option>
+            <option value="72">最近 72 小时</option>
+          </select>
+          <button class="button secondary" id="playBtn" type="button">播放</button>
+          <button class="button secondary" id="pauseBtn" type="button">暂停</button>
+          <button class="button" id="rebuildBtn">重建图谱</button>
+        </div>
+      </section>
+
+      <section class="grid cols-3">
+        <div class="card" data-delay="1">
+          <div class="card-header">
+            <div class="card-title">节点</div>
+            <span class="badge">实体</span>
+          </div>
+          <div class="card-value" id="nodeCount">--</div>
+          <div class="card-sub">主机 / IP / 用户</div>
+        </div>
+        <div class="card" data-delay="2">
+          <div class="card-header">
+            <div class="card-title">连线</div>
+            <span class="badge safe">关系</span>
+          </div>
+          <div class="card-value" id="edgeCount">--</div>
+          <div class="card-sub">行为路径</div>
+        </div>
+        <div class="card" data-delay="3">
+          <div class="card-header">
+            <div class="card-title">聚焦</div>
+            <span class="badge warn">热区</span>
+          </div>
+          <div class="card-value">实时</div>
+          <div class="card-sub">高价值轨迹</div>
+        </div>
+      </section>
+
+      <section class="grid cols-2">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">攻击关系图</div>
+            <span class="inline-note">交互式力导向</span>
+          </div>
+          <div id="graphCanvas" class="chart" style="height: 520px"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">路径洞察</div>
+              <span class="inline-note">最新路径</span>
+            </div>
+            <div class="list" id="flowList"></div>
+          </div>
+          <div class="divider"></div>
+          <div class="panel-section">
+            <div class="panel-header">
+              <div class="panel-title">溯源顺序</div>
+              <span class="inline-note">起点到终点</span>
+            </div>
+            <div class="sequence-rail" id="sequenceList"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>TraceX Atlas 可视化</div>
+      <div class="mono">攻击图谱视图</div>
+    </footer>
+  </body>
+</html>
