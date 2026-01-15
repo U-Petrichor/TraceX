@@ -23,6 +23,15 @@ class FieldMapper:
         "CurrentDirectory": ["process.working_directory"],
     }
     
+    WINDOWS_PROCESS_CREATION_MAP = {
+        "Image": ["process.executable", "process.name"],
+        "CommandLine": ["process.command_line", "raw.input", "raw.data"],
+        "User": ["process.user.name", "user.name"],
+        "ParentImage": ["process.parent.executable", "process.parent.name"],
+        "ParentCommandLine": ["process.parent.command_line"],
+        "CurrentDirectory": ["process.working_directory"],
+    }
+    
     LINUX_AUDITD_MAP = {
         "key": ["event.action", "raw.key"],
         "type": ["raw.type"],
@@ -77,6 +86,11 @@ class FieldMapper:
         category = logsource.get('category', '')
         dataset = event.get('event', {}).get('dataset', '')
         raw_type = event.get('raw', {}).get('type', '')
+        
+        if product == 'windows':
+            if category == 'process_creation':
+                return self._map_with_table(event, self.WINDOWS_PROCESS_CREATION_MAP)
+            return event
         
         if product == 'linux':
             if category == 'process_creation':
@@ -183,6 +197,18 @@ class EventNormalizer:
         dataset = event.get('event', {}).get('dataset', '')
         raw_type = event.get('raw', {}).get('type', '')
         category = event.get('event', {}).get('category', '')
+        
+        # 0. Windows 日志（用于 Sigma 规则匹配）
+        if dataset and "windows" in dataset.lower():
+            if category == 'process':
+                return {'product': 'windows', 'category': 'process_creation'}
+            if category == 'file':
+                return {'product': 'windows', 'category': 'file_event'}
+            if category == 'network':
+                return {'product': 'windows', 'category': 'network_connection'}
+            if category == 'authentication':
+                return {'product': 'windows', 'category': 'authentication'}
+            return {'product': 'windows'}
         
         # 1. Cowrie 蜜罐逻辑 (优先级提升，确保蜜罐属性不被 Linux 逻辑覆盖)
         # 组员 2 文档指出 Cowrie 包含登录(authentication)和命令(process)

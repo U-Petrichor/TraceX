@@ -47,6 +47,7 @@ class ProvenanceSystem:
         # GraphBuilder.build_from_events 会根据 host+pid+st 自动计算边
         graph_data = self.graph_builder.build_from_events(all_events)
         
+        # ATLAS 序列仅用于后续 NODOZE 频率统计（对比历史本机活动），暂不参与归因
         labels = [self.atlas_mapper.get_label(e) for e in all_events]
         signature = " -> ".join(sorted(set([l for l in labels if l != "UNKNOWN"])))
 
@@ -67,7 +68,6 @@ class ProvenanceSystem:
             "edges": graph_data.get('edges', []),
             "path_signature": signature,
             "intelligence": {
-                "attribution_atlas": self.enricher.attribute_apt([l for l in labels if l != "UNKNOWN"]),
                 "attribution_ttp": self.enricher.attribute_by_ttps(list(set(ttps))),
                 "external_infrastructure": ioc_enrichment
             },

@@ -145,6 +145,14 @@ class IntelEnricher:
                 ioc="192.168.1.5", ioc_type="ip", risk_score=0,
                 tags=["internal", "lab"], geo="Internal Network", source="local_custom"
             ),
+            "10.0.0.50": ThreatIntelEntry(
+                ioc="10.0.0.50", ioc_type="ip", risk_score=0,
+                tags=["internal", "lab"], geo="Internal Network", source="local_custom"
+            ),
+            "192.168.1.20": ThreatIntelEntry(
+                ioc="192.168.1.20", ioc_type="ip", risk_score=0,
+                tags=["internal", "lab"], geo="Internal Network", source="local_custom"
+            ),
             "172.26.155.27": ThreatIntelEntry(
                 ioc="172.26.155.27", ioc_type="ip", risk_score=0,
                 tags=["internal", "lab"], geo="Internal Network", source="local_custom"
@@ -156,6 +164,14 @@ class IntelEnricher:
                 tags=["C2", "CobaltStrike", "Malware", "模拟攻击"], 
                 geo="Lab Environment", source="local_custom"
             ),
+            "c2.lab.example": ThreatIntelEntry(
+                ioc="c2.lab.example", ioc_type="domain", risk_score=95,
+                tags=["C2", "Beacon", "模拟攻击"], geo="Lab", source="local_custom"
+            ),
+            "update-secure.example": ThreatIntelEntry(
+                ioc="update-secure.example", ioc_type="domain", risk_score=70,
+                tags=["Masquerade", "Phishing", "模拟攻击"], geo="Lab", source="local_custom"
+            ),
             "45.33.2.1": ThreatIntelEntry(
                 ioc="45.33.2.1", ioc_type="ip", risk_score=90,
                 tags=["C2", "Botnet", "模拟攻击"], geo="Lab", source="local_custom"
@@ -164,12 +180,30 @@ class IntelEnricher:
                 ioc="1.2.3.4", ioc_type="ip", risk_score=85,
                 tags=["C2", "Backdoor", "模拟攻击"], geo="Lab", source="local_custom"
             ),
+            "198.51.100.23": ThreatIntelEntry(
+                ioc="198.51.100.23", ioc_type="ip", risk_score=78,
+                tags=["Exfiltration", "HTTP-POST", "模拟攻击"], geo="Lab", source="local_custom"
+            ),
+            "203.0.113.99": ThreatIntelEntry(
+                ioc="203.0.113.99", ioc_type="ip", risk_score=65,
+                tags=["Scanner", "Recon", "模拟攻击"], geo="Lab", source="local_custom"
+            ),
             
             # 模拟攻击者 IP
             "59.64.129.102": ThreatIntelEntry(
                 ioc="59.64.129.102", ioc_type="ip", risk_score=80,
                 tags=["Attacker", "BruteForce", "SSH", "模拟攻击"], 
                 geo="Simulated Attacker", source="local_custom"
+            ),
+            
+            # 模拟外传/数据投递域名
+            "exfil.lab.example": ThreatIntelEntry(
+                ioc="exfil.lab.example", ioc_type="domain", risk_score=88,
+                tags=["Exfiltration", "DNS-Tunnel", "模拟攻击"], geo="Lab", source="local_custom"
+            ),
+            "drop.lab.example": ThreatIntelEntry(
+                ioc="drop.lab.example", ioc_type="domain", risk_score=82,
+                tags=["Payload", "Dropper", "模拟攻击"], geo="Lab", source="local_custom"
             ),
             
             # ========== 在这里添加更多你的模拟 IOC ==========
@@ -413,7 +447,7 @@ class IntelEnricher:
         props = node.get("properties", {})
         
         # IP 地址
-        for key in ["ip", "src_ip", "dst_ip", "source_ip"]:
+        for key in ["ip", "src_ip", "dst_ip", "source_ip", "dest_ip", "destination_ip"]:
             ip = props.get(key)
             if ip and ip not in ["", "127.0.0.1", "0.0.0.0"]:
                 iocs.append(ip)
