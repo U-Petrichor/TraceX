@@ -4,7 +4,7 @@ version: '3.8'
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
-    container_name: es-container
+    container_name: es-container-new
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms512m -Xmx512m 
@@ -30,7 +30,7 @@ services:
     container_name: cowrie-honeypot
     restart: always
     ports:
-      - "2222:2222"
+      - "2223:2222"
     volumes:
       - /root/TraceX/infrastructure/range/honeypots/cowrie/etc:/cowrie/cowrie-git/etc
       - /root/TraceX/infrastructure/range/honeypots/cowrie/var/log:/cowrie/cowrie-git/var/log
