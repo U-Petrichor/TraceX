@@ -284,6 +284,25 @@ class WinAgent:
         """Generate index name: unified-logs-{YYYY.MM.DD} (UTC)"""
         return f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
 
+    def _sanitize_payload(self, payload: dict) -> dict:
+        """
+        Sanitize payload for Elasticsearch:
+        1. Replace empty strings with None for strict types (IPs)
+        2. Recursively remove None values to keep payload clean (Optional, but safe)
+        """
+        # Specific fix for ES strict IP parsing error (mapper_parsing_exception)
+        # ES treats "" as an invalid IP, but accepts null
+        
+        if "source" in payload and isinstance(payload["source"], dict):
+            if payload["source"].get("ip") == "":
+                payload["source"]["ip"] = None
+                
+        if "destination" in payload and isinstance(payload["destination"], dict):
+            if payload["destination"].get("ip") == "":
+                payload["destination"]["ip"] = None
+        
+        return payload
+
     def send_to_es(self, event: UnifiedEvent):
         """Send event to Elasticsearch with retry logic"""
         index_name = self.get_index_name()
@@ -291,6 +310,9 @@ class WinAgent:
         
         # Convert UnifiedEvent to dict using its built-in method
         payload = event.to_dict()
+        
+        # Sanitize payload (Fix empty IP string error)
+        payload = self._sanitize_payload(payload)
 
         try:
             response = self.session.post(
