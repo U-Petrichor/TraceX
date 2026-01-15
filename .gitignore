@@ -28,3 +28,6 @@ data/elasticsearch/
 # 忽略 Cowrie 蜜罐产生的原始日志和状态文件
 infrastructure/range/honeypots/cowrie/var/log/
 infrastructure/range/honeypots/cowrie/var/lib/
+data/
+infrastructure/range/honeypots/cowrie/var/log/
+analyzer/graph_analyzer/pid_context_cache.json
