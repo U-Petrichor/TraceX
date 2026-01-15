@@ -2,18 +2,27 @@ import os
 import sys
 import time
 import json
-import uuid
 import socket
 import platform
-import random
 import logging
 import requests
 import ctypes
 from datetime import datetime
 from ctypes import wintypes
 
+# === Import Custom Modules ===
+# 1. Memory Scanner Library
+try:
+    from win_mem_scanner import WinMemoryScanner
+except ImportError:
+    # If run from root
+    try:
+        from collector.host_collector.win_mem_scanner import WinMemoryScanner
+    except ImportError:
+         print("CRITICAL: Cannot find win_mem_scanner module.")
+         sys.exit(1)
+
 # === Path Setup for Schema Import ===
-# Ensure we can import from collector.common.schema
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 if project_root not in sys.path:
@@ -22,16 +31,16 @@ if project_root not in sys.path:
 try:
     from collector.common.schema import (
         UnifiedEvent, EventInfo, HostInfo, HostOS, 
-        ProcessInfo, ProcessParent, ProcessUser,
-        MemoryInfo, MemoryAnomaly, DetectionInfo
+        MemoryInfo, MemoryAnomaly, DetectionInfo,
+        ProcessInfo
     )
 except ImportError as e:
-    print(f"CRITICAL: Failed to import Schema. Ensure project structure is correct. Error: {e}")
+    print(f"CRITICAL: Failed to import Schema. Error: {e}")
     sys.exit(1)
 
 # === Configuration ===
 ES_HOST = "http://182.92.114.32:9200"
-LOG_INTERVAL = 5  # Seconds between mock events
+SCAN_INTERVAL = 60 # Full scan every 60 seconds
 
 # Setup Logging
 logging.basicConfig(
@@ -41,131 +50,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("WinAgent")
 
-# === Windows API Definitions ===
+# === Helper: Process Enumeration (ctypes) ===
+psapi = ctypes.windll.psapi
 kernel32 = ctypes.windll.kernel32
 
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_VM_READ = 0x0010
-MEM_COMMIT = 0x1000
-MEM_PRIVATE = 0x20000
-MEM_IMAGE = 0x1000000
-PAGE_EXECUTE_READWRITE = 0x40
-PAGE_EXECUTE_READ = 0x20
-
-class SYSTEM_INFO(ctypes.Structure):
-    _fields_ = [
-        ("wProcessorArchitecture", wintypes.WORD),
-        ("wReserved", wintypes.WORD),
-        ("dwPageSize", wintypes.DWORD),
-        ("lpMinimumApplicationAddress", wintypes.LPVOID),
-        ("lpMaximumApplicationAddress", wintypes.LPVOID),
-        ("dwActiveProcessorMask", wintypes.DWORD * 2),  # ULONG_PTR on 64bit
-        ("dwNumberOfProcessors", wintypes.DWORD),
-        ("dwProcessorType", wintypes.DWORD),
-        ("dwAllocationGranularity", wintypes.DWORD),
-        ("wProcessorLevel", wintypes.WORD),
-        ("wProcessorRevision", wintypes.WORD),
-    ]
-
-class MEMORY_BASIC_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ("BaseAddress", ctypes.c_void_p),
-        ("AllocationBase", ctypes.c_void_p),
-        ("AllocationProtect", wintypes.DWORD),
-        ("PartitionId", wintypes.WORD),
-        ("RegionSize", ctypes.c_size_t),
-        ("State", wintypes.DWORD),
-        ("Protect", wintypes.DWORD),
-        ("Type", wintypes.DWORD),
-    ]
-
-class WinMemoryScanner:
-    """Windows Memory Anomaly Scanner (Analogous to Linux mem_scanner)"""
-    def __init__(self):
-        self.sys_info = SYSTEM_INFO()
-        kernel32.GetSystemInfo(ctypes.byref(self.sys_info))
-
-    def scan_pid(self, pid: int) -> list:
-        anomalies = []
-        process_handle = None
-        try:
-            process_handle = kernel32.OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 
-                False, 
-                pid
-            )
-            if not process_handle:
-                return []
-
-            address = 0
-            # Use lpMaximumApplicationAddress for user space limit
-            max_addr = self.sys_info.lpMaximumApplicationAddress
-            
-            mbi = MEMORY_BASIC_INFORMATION()
-            mbi_size = ctypes.sizeof(mbi)
-
-            while address < ctypes.addressof(max_addr): # Logic simplified, iterating by query
-                if kernel32.VirtualQueryEx(process_handle, ctypes.c_void_p(address), ctypes.byref(mbi), mbi_size) == 0:
-                    break
-
-                # 1. Check for RWX (Read-Write-Execute) Memory
-                # Often used by shellcode or unpacked malware
-                if mbi.State == MEM_COMMIT and (mbi.Protect == PAGE_EXECUTE_READWRITE):
-                    
-                    # Read first few bytes to check for PE header (MZ)
-                    header = self._read_memory(process_handle, mbi.BaseAddress, 2)
-                    is_pe = (header == b'MZ')
-                    
-                    risk = "CRITICAL" if mbi.Type == MEM_PRIVATE else "HIGH"
-                    
-                    anomalies.append(MemoryAnomaly(
-                        type="RWX_REGION",
-                        address=hex(mbi.BaseAddress if mbi.BaseAddress else 0),
-                        size=mbi.RegionSize,
-                        perms="RWX",
-                        path="[Private]" if mbi.Type == MEM_PRIVATE else "[Mapped]",
-                        is_elf=False, # Windows uses PE
-                        risk_level=risk,
-                        confidence=0.9,
-                        details=f"Detected RWX memory region. PE Header: {is_pe}"
-                    ))
-
-                # 2. Check for Executable Private Memory (Code Injection / Shellcode)
-                # Normal code is usually MEM_IMAGE (mapped from disk)
-                # MEM_PRIVATE + EXECUTE_READ usually means JIT or Shellcode
-                elif mbi.State == MEM_COMMIT and (mbi.Protect == PAGE_EXECUTE_READ) and (mbi.Type == MEM_PRIVATE):
-                     anomalies.append(MemoryAnomaly(
-                        type="PRIVATE_EXEC",
-                        address=hex(mbi.BaseAddress if mbi.BaseAddress else 0),
-                        size=mbi.RegionSize,
-                        perms="RX",
-                        path="[Private]",
-                        is_elf=False,
-                        risk_level="MEDIUM",
-                        confidence=0.7,
-                        details="Detected Private Executable memory (Potential Shellcode/JIT)"
-                    ))
-
-                address += mbi.RegionSize
-                
-        except Exception as e:
-            # Access denied or process exited is common
-            pass
-        finally:
-            if process_handle:
-                kernel32.CloseHandle(process_handle)
-        
-        return anomalies
-
-    def _read_memory(self, handle, address, size):
-        buffer = ctypes.create_string_buffer(size)
-        bytes_read = ctypes.c_size_t(0)
-        if kernel32.ReadProcessMemory(handle, ctypes.c_void_p(address), buffer, size, ctypes.byref(bytes_read)):
-            return buffer.raw
-        return b''
+def enum_processes():
+    """Returns a list of PIDs using EnumProcesses"""
+    # Allocate array for PIDs
+    arr = (ctypes.c_ulong * 1024)()
+    cb = ctypes.sizeof(arr)
+    cb_needed = ctypes.c_ulong()
+    
+    if psapi.EnumProcesses(ctypes.byref(arr), cb, ctypes.byref(cb_needed)):
+        count = cb_needed.value // ctypes.sizeof(ctypes.c_ulong)
+        return [arr[i] for i in range(count)]
+    return []
 
 class SystemInfoCollector:
-    """Collects static system information (Windows)"""
+    """Collects static system information"""
     def __init__(self):
         self.hostname = socket.gethostname()
         self.ip = self._get_local_ip()
@@ -173,7 +75,6 @@ class SystemInfoCollector:
 
     def _get_local_ip(self):
         try:
-            # Connect to external server to get the interface IP used for routing
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
@@ -184,9 +85,6 @@ class SystemInfoCollector:
 
     def _get_os_info(self):
         try:
-            # platform.system() -> 'Windows'
-            # platform.release() -> '10', 'Server', etc.
-            # platform.version() -> '10.0.19041'
             return HostOS(
                 family="windows",
                 name=f"Windows {platform.release()}",
@@ -196,68 +94,56 @@ class SystemInfoCollector:
             return HostOS(family="windows", name="Unknown", version="0.0")
 
 class WinAgent:
-    """Windows Collection Agent with Mock Data Generation"""
+    """
+    TraceX Windows Agent (Real)
+    Currently focuses on Memory Monitoring.
+    """
     def __init__(self):
         self.sys_info = SystemInfoCollector()
-        self.mem_scanner = WinMemoryScanner() # Initialize Scanner
+        self.mem_scanner = WinMemoryScanner()
         self.session = requests.Session()
-        logger.info(f"Agent initialized for host: {self.sys_info.hostname} ({self.sys_info.ip})")
+        logger.info(f"WinAgent initialized on {self.sys_info.hostname}")
 
-    def generate_mock_event(self) -> UnifiedEvent:
-        """Generates a simulated Process Creation event"""
-        
-        # 1. Mock Process Data
-        mock_procs = [
-            ("powershell.exe", "C:\\Windows\\System32\\powershell.exe", "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ls"),
-            ("cmd.exe", "C:\\Windows\\System32\\cmd.exe", "cmd.exe /c whoami"),
-            ("svchost.exe", "C:\\Windows\\System32\\svchost.exe", "svchost.exe -k netsvcs -p"),
-            ("notepad.exe", "C:\\Windows\\System32\\notepad.exe", "notepad.exe secret.txt")
-        ]
-        proc_name, proc_exe, proc_cmd = random.choice(mock_procs)
-        pid = random.randint(1000, 9999)
-        
-        # 2. Build UnifiedEvent
-        # Timestamp must be UTC ISO8601 string
+    def get_index_name(self):
+        return f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
+    
+    def _sanitize_payload(self, payload: dict) -> dict:
+        if "source" in payload and isinstance(payload["source"], dict):
+            if payload["source"].get("ip") == "":
+                payload["source"]["ip"] = None
+        if "destination" in payload and isinstance(payload["destination"], dict):
+            if payload["destination"].get("ip") == "":
+                payload["destination"]["ip"] = None
+        return payload
+
+    def send_alert(self, pid: int, anomalies: list):
+        """Constructs and sends an alert event for detected anomalies"""
         utc_now = datetime.utcnow()
         timestamp_str = utc_now.isoformat() + "Z"
-
-        # 3. Simulate Memory Scan (Triggered randomly for demo)
-        # In production, this would scan the actual PID. 
-        # Since we are mocking the process, we scan self (the agent) or just simulate anomalies.
-        # For demonstration of the TOOL, we will simulate a scan result attached to this event.
         
-        mem_info = MemoryInfo()
-        # Randomly inject a fake memory anomaly to demonstrate schema compliance
-        if random.random() < 0.3: # 30% chance to simulate a threat
-            mem_info.anomalies.append(MemoryAnomaly(
-                type="RWX_REGION",
-                address="0x7ff0001000",
-                size=4096,
-                perms="RWX",
-                path="[Private]",
-                risk_level="CRITICAL",
-                confidence=0.95,
-                details="Simulated RWX Memory Detection (WinAgent)"
+        # Convert dict anomalies (from scanner) to Schema objects
+        schema_anomalies = []
+        for a in anomalies:
+            schema_anomalies.append(MemoryAnomaly(
+                type=a["type"],
+                address=a["address"],
+                size=a["size"],
+                perms=a["perms"],
+                path=a["path"],
+                is_elf=a["is_elf"],
+                risk_level=a["risk_level"],
+                confidence=a["confidence"],
+                details=a["details"]
             ))
-            
-            # Add Detection Info
-            detection_info = DetectionInfo(
-                rules=["Windows Memory Scanner"],
-                confidence=0.9,
-                severity="high"
-            )
-        else:
-            detection_info = DetectionInfo()
 
         event = UnifiedEvent(
             timestamp=timestamp_str,
             event=EventInfo(
-                category="process",
-                action="creation",
-                type="start",
-                outcome="success",
-                severity=1,
-                dataset="windows_mock"
+                category="host",
+                type="info",
+                action="memory_scan",
+                severity=8, # High severity for memory threats
+                dataset="win_memory_scanner"
             ),
             host=HostInfo(
                 name=self.sys_info.hostname,
@@ -267,104 +153,57 @@ class WinAgent:
             ),
             process=ProcessInfo(
                 pid=pid,
-                name=proc_name,
-                executable=proc_exe,
-                command_line=proc_cmd,
-                parent=ProcessParent(pid=random.randint(400, 900), name="explorer.exe"),
-                user=ProcessUser(name="SYSTEM", id="S-1-5-18"),
+                name="<unknown>", # Without OpenProcess query we might not know name here easily
                 start_time=timestamp_str
             ),
-            memory=mem_info, # Attach Memory Info
-            detection=detection_info,
-            message=f"Process started: {proc_cmd}"
+            memory=MemoryInfo(anomalies=schema_anomalies),
+            detection=DetectionInfo(
+                rules=["WinMemoryScanner"],
+                severity="high",
+                confidence=0.9
+            ),
+            message=f"Detected {len(anomalies)} memory anomalies in PID {pid}"
         )
-        return event
-
-    def get_index_name(self):
-        """Generate index name: unified-logs-{YYYY.MM.DD} (UTC)"""
-        return f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
-
-    def _sanitize_payload(self, payload: dict) -> dict:
-        """
-        Sanitize payload for Elasticsearch:
-        1. Replace empty strings with None for strict types (IPs)
-        2. Recursively remove None values to keep payload clean (Optional, but safe)
-        """
-        # Specific fix for ES strict IP parsing error (mapper_parsing_exception)
-        # ES treats "" as an invalid IP, but accepts null
         
-        if "source" in payload and isinstance(payload["source"], dict):
-            if payload["source"].get("ip") == "":
-                payload["source"]["ip"] = None
-                
-        if "destination" in payload and isinstance(payload["destination"], dict):
-            if payload["destination"].get("ip") == "":
-                payload["destination"]["ip"] = None
-        
-        return payload
-
-    def send_to_es(self, event: UnifiedEvent):
-        """Send event to Elasticsearch with retry logic"""
+        # Send
         index_name = self.get_index_name()
         url = f"{ES_HOST}/{index_name}/_doc"
+        payload = self._sanitize_payload(event.to_dict())
         
-        # Convert UnifiedEvent to dict using its built-in method
-        payload = event.to_dict()
-        
-        # Sanitize payload (Fix empty IP string error)
-        payload = self._sanitize_payload(payload)
-
         try:
-            response = self.session.post(
-                url, 
-                json=payload, 
-                headers={"Content-Type": "application/json"},
-                timeout=5
-            )
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"Sent event [{event.event.id}] to index [{index_name}]")
-            else:
-                logger.error(f"Failed to send event. Status: {response.status_code}, Response: {response.text}")
-                
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Network error connecting to ES ({ES_HOST}): {e}. Retrying later...")
+            self.session.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=5)
+            logger.warning(f"ALERT SENT: Found memory anomalies in PID {pid}")
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.error(f"Failed to send alert: {e}")
 
     def run(self):
-        """Main Loop"""
-        logger.info("WinAgent started. Press Ctrl+C to stop.")
+        logger.info("Agent running. Scanning memory every 60s...")
         
-        # Optional: Demo scanning self on startup
-        try:
-            my_pid = os.getpid()
-            logger.info(f"Performing self-diagnostic memory scan (PID: {my_pid})...")
-            anomalies = self.mem_scanner.scan_pid(my_pid)
-            if anomalies:
-                logger.warning(f"Self-scan found anomalies: {len(anomalies)}")
-            else:
-                logger.info("Self-scan clean.")
-        except Exception as e:
-            logger.error(f"Self-scan failed: {e}")
-
         while True:
             try:
-                # 1. Generate Data
-                event = self.generate_mock_event()
+                # 1. Get PIDs
+                pids = enum_processes()
+                logger.info(f"Scanning {len(pids)} processes...")
                 
-                # 2. Send to Cloud
-                self.send_to_es(event)
+                # 2. Scan each PID
+                for pid in pids:
+                    # Skip System/Idle processes usually 0 and 4
+                    if pid <= 4: 
+                        continue
+                        
+                    anomalies = self.mem_scanner.scan_pid(pid)
+                    if anomalies:
+                        self.send_alert(pid, anomalies)
                 
-                # 3. Wait
-                time.sleep(LOG_INTERVAL)
+                logger.info("Scan complete.")
+                time.sleep(SCAN_INTERVAL)
                 
             except KeyboardInterrupt:
-                logger.info("Agent stopped by user.")
+                logger.info("Agent stopped.")
                 break
             except Exception as e:
-                logger.error(f"Main loop error: {e}")
-                time.sleep(5)
+                logger.error(f"Agent loop error: {e}")
+                time.sleep(10)
 
 if __name__ == "__main__":
     agent = WinAgent()
