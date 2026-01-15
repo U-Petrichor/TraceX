@@ -4,7 +4,13 @@ import sys
 import json
 import warnings
 import socket
-from datetime import datetime
+import threading
+import subprocess
+import platform
+import psutil
+import hashlib
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 # Suppress ES security warnings
 warnings.filterwarnings("ignore", message=".*Elasticsearch built-in security features are not enabled.*")
@@ -28,10 +34,251 @@ except ImportError:
     sys.exit(1)
 
 # === Configuration ===
-LOG_FILE = "/var/log/audit/audit.log"
+LOG_FILE = os.getenv("TRACE_AUDIT_LOG", "/var/log/audit/audit.log")
 STATE_FILE = os.path.join(current_dir, "agent_state.json")
 ES_HOST = "http://localhost:9200"
 ENABLE_ES_WRITE = True
+
+# Memory Scanner Configuration
+_PROD_SCANNER = "/opt/tracex/bin/mem_scanner"
+_DEV_SCANNER = os.path.join(current_dir, "mem_scanner/bin/scanner")
+
+if os.path.exists(_PROD_SCANNER):
+    MEM_SCANNER_BIN = _PROD_SCANNER
+    print(f"[*] Memory Scanner: Found in PRODUCTION path: {MEM_SCANNER_BIN}")
+elif os.path.exists(_DEV_SCANNER):
+    MEM_SCANNER_BIN = _DEV_SCANNER
+    print(f"[*] Memory Scanner: Found in DEVELOPMENT path: {MEM_SCANNER_BIN}")
+else:
+    # Default to Dev path even if missing, to let checks fail naturally later or show specific error
+    MEM_SCANNER_BIN = _DEV_SCANNER
+    print(f"[!] Warning: MemScanner binary not found in Prod ({_PROD_SCANNER}) or Dev ({_DEV_SCANNER}) paths.")
+
+if platform.system() == 'Windows':
+    MEM_SCANNER_BIN = "" # Disabled on Windows
+
+# === Index Naming Helper ===
+def get_current_index_name():
+    """
+    Generate index name based on Beijing Time (UTC+8).
+    Format: unified-logs-YYYY.MM.DD
+    Matches TraceX v5.1 standard.
+    """
+    beijing_time = datetime.utcnow() + timedelta(hours=8)
+    return f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
+
+# === Behavior Analysis & Memory Monitoring ===
+class BehaviorAnalyzer:
+    def __init__(self, es_client, index_name_func):
+        self.es = es_client
+        self.get_index_name = index_name_func
+        self.pid_events = defaultdict(list)  # {pid: [(syscall, timestamp)]}
+        self.scan_history = {} # {pid: last_scan_timestamp}
+        self.alert_history = {} # {pid: last_alert_timestamp}
+        self.lock = threading.Lock()
+        
+        # High Risk Sequence Definitions
+        self.sequences = [
+            # Sequence 1: Ptrace Injection
+            {
+                "events": ["ptrace", "write"],
+                "window": 5.0,
+                "name": "Ptrace Injection"
+            },
+            # Sequence 2: Fileless Execution
+            {
+                "events": ["memfd_create", "execve"], 
+                "window": 5.0,
+                "name": "Fileless Execution"
+            },
+            # Sequence 3: Memory Tampering
+            {
+                "events": ["write", "mprotect"],
+                "window": 5.0,
+                "name": "Memory Tampering"
+            }
+        ]
+
+    def record_event(self, pid, syscall):
+        if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
+            return
+
+        now = time.time()
+        with self.lock:
+            # Add event to history
+            self.pid_events[pid].append((syscall, now))
+            
+            # Prune old events (> 10s)
+            self.pid_events[pid] = [e for e in self.pid_events[pid] if now - e[1] < 10.0]
+            
+            # Check sequences
+            self._check_sequences(pid)
+
+    def _check_sequences(self, pid):
+        events = [e[0] for e in self.pid_events[pid]]
+        
+        should_scan = False
+        reason = ""
+        
+        # Check explicit sequences
+        for seq in self.sequences:
+            required = seq["events"]
+            # Simple check: do all required events exist in recent history in order?
+            last_idx = -1
+            found_count = 0
+            for req_evt in required:
+                try:
+                    idx = events.index(req_evt, last_idx + 1)
+                    last_idx = idx
+                    found_count += 1
+                except ValueError:
+                    break
+            
+            if found_count == len(required):
+                should_scan = True
+                reason = seq["name"]
+                break
+        
+        # Check single high-risk syscalls
+        if not should_scan:
+            if "ptrace" in events:
+                should_scan = True
+                reason = "Suspicious Ptrace"
+            elif "memfd_create" in events:
+                should_scan = True
+                reason = "Memfd Creation"
+        
+        if should_scan:
+            self._trigger_scan(pid, reason)
+
+    def _trigger_scan(self, pid, reason):
+        now = time.time()
+        last_scan = self.scan_history.get(pid, 0)
+        
+        # Debounce: 5 seconds
+        if now - last_scan < 5.0:
+            return
+            
+        self.scan_history[pid] = now
+        
+        # Run scan in background thread to avoid blocking main loop
+        threading.Thread(target=self._run_scan, args=(pid, reason), daemon=True).start()
+
+    def _run_scan(self, pid, reason):
+        try:
+            # Timeout is crucial to prevent zombie processes
+            result = subprocess.run(
+                [MEM_SCANNER_BIN, "--pid", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    data = json.loads(result.stdout)
+                    self._ingest_scan_result(data, reason)
+                except json.JSONDecodeError:
+                    pass
+        except subprocess.TimeoutExpired:
+            pass # Scan took too long, ignore
+        except Exception as e:
+            print(f"[-] Scan error for PID {pid}: {e}")
+
+    def _ingest_scan_result(self, data, reason):
+        pid = data.get("pid")
+        raw_anomalies = data.get("anomalies", [])
+        
+        # Filter anomalies: Only keep HIGH or CRITICAL
+        anomalies = [
+            a for a in raw_anomalies 
+            if a.get("risk_level") in ["HIGH", "CRITICAL"]
+        ]
+        
+        if not anomalies:
+            return
+
+        try:
+            sig_str = json.dumps(anomalies, sort_keys=True)
+            signature = hashlib.md5(sig_str.encode('utf-8')).hexdigest()
+        except:
+            signature = str(anomalies)
+
+        now = time.time()
+        last_alert_time, last_signature = self.alert_history.get(pid, (0, ""))
+        
+        if signature == last_signature and (now - last_alert_time < 300):
+            return
+
+        self.alert_history[pid] = (now, signature)
+
+        # Convert to UnifiedEvent format
+        doc = {
+            "@timestamp": datetime.utcnow().isoformat() + "Z",
+            "host": {"name": socket.gethostname()},
+            "event": {
+                "category": "memory",
+                "action": "anomaly_detected",
+                "severity": 10, # Memory anomalies are always critical
+                "reason": reason
+            },
+            "process": {
+                "pid": data.get("pid"),
+                "executable": data.get("exe")
+            },
+            "memory": {
+                "anomalies": anomalies
+            }
+        }
+        
+        try:
+            index = self.get_index_name()
+            if ENABLE_ES_WRITE:
+                self.es.index(index=index, document=doc)
+                print(f"[!] Memory Anomaly Detected (PID {data.get('pid')}): {reason}")
+            else:
+                print(f"[DRY-RUN] Memory Anomaly Detected (PID {data.get('pid')}): {reason}")
+        except Exception as e:
+            print(f"[-] ES Index Error: {e}")
+
+    def run_periodic_scan(self):
+        """Run full scan periodically if load is low"""
+        time.sleep(2)
+        
+        while True:
+            if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
+                time.sleep(300)
+                continue
+                
+            # Smart Load Check
+            try:
+                if psutil.cpu_percent() > 80.0:
+                    time.sleep(300) 
+                    continue
+            except ImportError:
+                pass 
+                
+            try:
+                # Run full scan
+                result = subprocess.run(
+                    [MEM_SCANNER_BIN, "--scan-all"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        try:
+                            data = json.loads(line)
+                            self._ingest_scan_result(data, "Periodic Scan")
+                        except:
+                            continue
+            except Exception as e:
+                print(f"[-] Periodic scan error: {e}")
+            
+            time.sleep(300)
 
 # === State & Lock Management ===
 def load_state():
@@ -146,10 +393,9 @@ def main():
     saved_inode, saved_offset = acquire_lock()
     parser = HostLogParser()
     
-    # Index naming (Beijing Time)
-    from datetime import timedelta
-    beijing_time = datetime.utcnow() + timedelta(hours=8)
-    index_name = f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
+    # Initialize Behavior Analyzer
+    analyzer = BehaviorAnalyzer(es, get_current_index_name)
+    threading.Thread(target=analyzer.run_periodic_scan, daemon=True).start()
     
     print(f"[*] Monitoring: {LOG_FILE}")
     print("[*] Visual Mode: Whitelist & Highlights Active.")
@@ -177,6 +423,9 @@ def main():
 
     try:
         while True:
+            # [FIX] Get dynamic index name inside the loop to ensure rotation and correct naming
+            current_index_name = get_current_index_name()
+
             line = file_obj.readline()
             if not line:
                 try:
@@ -242,34 +491,27 @@ def main():
                             else:
                                 print(f"{GREEN}[+] 🟢 WATCHED: {summary}{RESET}")
 
+                    # === Behavior Hook ===
+                    try:
+                        pid = int(process.get('pid', 0))
+                        syscall = ""
+                        action = doc.get('event', {}).get('action', '')
+                        if doc.get('event', {}).get('category') == 'process':
+                            if action == 'process_started': syscall = 'execve'
+                            elif 'ptrace' in line_str: syscall = 'ptrace'
+                            elif 'memfd_create' in line_str: syscall = 'memfd_create'
+                            elif 'mprotect' in line_str: syscall = 'mprotect'
+                        
+                        if pid > 0 and syscall:
+                            analyzer.record_event(pid, syscall)
+                    except:
+                        pass
+
                     # === Alignment Logic (Group 1) ===
                     if 'host' not in doc: doc['host'] = {}
                     doc['host']['name'] = socket.gethostname()
                     
                     # Severity
-                    # Use existing boolean flags from Visual Filtering
-                    current_severity = doc.get('event', {}).get('severity', 1)
-                    
-                    # Re-calculate flags if skipped (e.g. process_started skipped printing but we might want to index it? 
-                    # Wait, should_print logic might skip calculation?
-                    # No, variables is_watched_proc etc are calculated inside the else of "process_started" check.
-                    # If "process_started" in summary, should_print=False, and those vars are NOT calculated!
-                    # So I need to be careful.
-                    # If "process_started" in summary, we skip printing.
-                    # Do we skip indexing? The code says `if ENABLE_ES_WRITE: ... es.index`.
-                    # So we DO index it.
-                    # So we need to ensure variables are defined or re-calculate.
-                    
-                    # Let's look at the context again.
-                    # if "process_started" in summary: should_print = False
-                    # else: ... calculate is_sensitive_file ...
-                    
-                    # If "process_started", those vars are undefined! Python might throw UnboundLocalError.
-                    # Ah, I see "process_started" check is the first branch.
-                    # So I need to initialize them or check safely.
-                    
-                    # Better: Recalculate safely for ES purposes.
-                    
                     proc_cmd_line = doc.get('process', {}).get('command_line', '')
                     evt_action = doc.get('event', {}).get('action', '')
                     user_id = str(doc.get('user', {}).get('id', ''))
@@ -279,6 +521,7 @@ def main():
                     chk_root = (user_id == '0') and (evt_action != 'process_started')
                     chk_failed = (outcome == 'failure')
                     
+                    current_severity = 1
                     if chk_sensitive:
                         current_severity = 10
                     elif chk_root:
@@ -291,14 +534,14 @@ def main():
 
                     if ENABLE_ES_WRITE:
                         try:
-                            es.index(index=index_name, document=doc)
+                            es.index(index=current_index_name, document=doc)
                         except Exception as e:
                             print(f"[-] ES Write Error: {e}")
             else:
                 if ENABLE_ES_WRITE:
                     raw_doc = make_raw_doc(line_str)
                     try:
-                        es.index(index=index_name, document=raw_doc)
+                        es.index(index=current_index_name, document=raw_doc)
                     except Exception as e:
                         print(f"[-] ES Write Error (Raw): {e}")
 

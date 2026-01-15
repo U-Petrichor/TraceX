@@ -36,7 +36,8 @@ except ImportError:
 # === Configuration ===
 LOG_FILE = "/var/log/audit/audit.log"
 STATE_FILE = os.path.join(current_dir, "agent_state.json")
-ES_HOST = "http://localhost:9200"
+# Allow configuration via environment variable for distributed deployment
+ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
 
 # Memory Scanner Configuration
 _PROD_SCANNER = "/opt/tracex/bin/mem_scanner"

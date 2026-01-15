@@ -25,7 +25,9 @@ except ImportError:
 
 class ZeekParser:
     def __init__(self):
-        self.es_client = ESClient(hosts=["http://localhost:9200"])
+        # Allow configuration via environment variable for distributed deployment
+        es_host = os.getenv("ES_HOST", "http://localhost:9200")
+        self.es_client = ESClient(hosts=[es_host])
         self.log_dir = "/root/TraceX/data/zeek-logs"
         self.hostname = socket.gethostname() # 获取当前传感器主机名，用于图关联
         
