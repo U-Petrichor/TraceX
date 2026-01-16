@@ -19,7 +19,9 @@ def simulate_memory_injection():
     print("[*] 正在申请 RWX (Read-Write-Execute) 隐蔽内存区域...")
     
     # 1. 申请一块 RWX 内存 (这是 TraceX 内存扫描最敏感的特征)
-    # 这模拟了 Cobalt Strike Beacon 或 Meterpreter 的行为
+    # VirtualAlloc 返回的是整数地址，但在 64位 Python 中可能是个很大的数
+    # ctypes 需要明确指明返回类型为 void pointer (c_void_p)
+    kernel32.VirtualAlloc.restype = ctypes.c_void_p
     ptr = kernel32.VirtualAlloc(None, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
     
     if not ptr:
