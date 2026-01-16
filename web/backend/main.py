@@ -19,12 +19,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from collector.common.es_client import ESClient
 from analyzer.attack_analyzer.context_engine import ContextEngine
+from analyzer.graph_analyzer.mitre_loader import MITRELoader
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TraceX Dashboard API")
+
+# Initialize MITRE Loader
+mitre_loader = MITRELoader()
 
 # Enable CORS
 app.add_middleware(
@@ -902,6 +906,43 @@ def get_apt_report(mode: str = "direct", data: str = "APT28.jsonl", refresh: boo
 
     report = _run_pipeline(safe_mode, safe_data)
     if report:
+        # Enrich with MITRE STIX Data
+        try:
+            profile = report.get("apt_profile", {})
+            # Try to get name from profile, or fallback to filename (e.g. APT28)
+            apt_name = profile.get("name")
+            if not apt_name or apt_name == "未知":
+                # Extract from filename e.g. "APT28.jsonl" -> "APT28"
+                apt_name = Path(safe_data).stem.split('_')[0]
+                # Also handle cases like "simulate_apt28" -> "apt28"
+                if "apt" in apt_name.lower():
+                     match = re.search(r"(apt\d+)", apt_name.lower())
+                     if match:
+                         apt_name = match.group(1).upper()
+
+            if apt_name:
+                group = mitre_loader.get_group_by_name(apt_name)
+                if group:
+                    # Enrich profile
+                    profile["name"] = group.name # Use official name
+                    profile["description"] = group.description
+                    profile["mitre_id"] = group.attack_id
+                    profile["url"] = f"https://attack.mitre.org/groups/{group.attack_id}"
+                    
+                    # Merge aliases
+                    current_aliases = set(profile.get("aliases", []))
+                    current_aliases.update(group.aliases)
+                    profile["aliases"] = sorted(list(current_aliases))
+                    
+                    # Add techniques names if missing
+                    if "techniques" not in profile:
+                         profile["techniques"] = group.techniques
+                    
+                    report["apt_profile"] = profile
+                    logger.info(f"Enriched APT profile for {apt_name} with STIX data")
+        except Exception as e:
+            logger.warning(f"Failed to enrich report with STIX data: {e}")
+
         try:
             cache_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as exc:

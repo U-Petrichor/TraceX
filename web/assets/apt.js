@@ -28,6 +28,9 @@
     profileAliases: document.querySelector("#aptProfileAliases"),
     profileTtps: document.querySelector("#aptProfileTtps"),
     profileIndustries: document.querySelector("#aptProfileIndustries"),
+    profileDescription: document.querySelector("#aptProfileDescription"),
+    profileMitreId: document.querySelector("#aptProfileMitreId"),
+    profileUrl: document.querySelector("#aptProfileUrl"),
     iocGrid: document.querySelector("#aptIocGrid"),
   };
 
@@ -357,6 +360,25 @@
     if (els.profileTtpCount) {
       els.profileTtpCount.textContent = formatNumber ? formatNumber(profile.ttps?.length || 0) : String(profile.ttps?.length || 0);
     }
+    
+    if (els.profileDescription) {
+      els.profileDescription.textContent = profile.description || "暂无描述";
+    }
+    if (els.profileMitreId) {
+      els.profileMitreId.textContent = profile.mitre_id || "--";
+    }
+    if (els.profileUrl) {
+      if (profile.url) {
+        els.profileUrl.href = profile.url;
+        els.profileUrl.style.display = "inline-flex";
+        els.profileUrl.classList.remove("disabled");
+      } else {
+        els.profileUrl.removeAttribute("href");
+        els.profileUrl.classList.add("disabled");
+        els.profileUrl.style.display = "none";
+      }
+    }
+
     renderTags(els.profileAliases, profile.aliases, "soft");
     renderTags(els.profileTtps, profile.ttps, "accent");
     const industries = Array.isArray(profile.target_industries) && profile.target_industries.length ? profile.target_industries : [];
