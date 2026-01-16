@@ -181,6 +181,7 @@ def main():
         # Create marker file for frontend
         marker_path = os.path.join(project_root, "web", "backend", "active_simulations", "Indrik_Spider.jsonl")
         try:
+            os.makedirs(os.path.dirname(marker_path), exist_ok=True)
             with open(marker_path, 'w') as f:
                 f.write("active")
             print(f"[+] Created active simulation marker: {marker_path}")

@@ -31,3 +31,8 @@ infrastructure/range/honeypots/cowrie/var/lib/
 data/
 infrastructure/range/honeypots/cowrie/var/log/
 analyzer/graph_analyzer/pid_context_cache.json
+
+# Web Backend Runtime Data
+web/backend/cache/
+web/backend/active_simulations/
+
