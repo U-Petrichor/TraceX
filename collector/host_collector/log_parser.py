@@ -30,7 +30,10 @@ class HostLogParser:
     def _parse_windows(self, win_log: dict) -> UnifiedEvent:
         """解析 Windows Event Log (保留你原来的逻辑)"""
         event = UnifiedEvent()
-        event.raw = win_log
+        # event.raw = win_log # 移除 Raw Log，防止字段爆炸
+        # 如果需要 raw 数据，应该存成字符串，而不是嵌套字典
+        event.raw = json.dumps(win_log, ensure_ascii=False) 
+        
         event.event.dataset = "windows"
         
         event_id = win_log.get("EventID")
