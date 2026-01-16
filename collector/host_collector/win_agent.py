@@ -93,10 +93,11 @@ class SystemInfoCollector:
         except Exception:
             return HostOS(family="windows", name="Unknown", version="0.0")
 
+# === WinAgent (标准版) ===
 class WinAgent:
     """
-    TraceX Windows Agent (Real)
-    Currently focuses on Memory Monitoring.
+    TraceX Windows Agent (标准版)
+    目前主要专注于内存异常监控 (Memory Monitoring)。
     """
     def __init__(self):
         self.sys_info = SystemInfoCollector()
@@ -105,9 +106,11 @@ class WinAgent:
         logger.info(f"WinAgent initialized on {self.sys_info.hostname}")
 
     def get_index_name(self):
+        # 统一使用北京时间
         return f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
     
     def _sanitize_payload(self, payload: dict) -> dict:
+        """清理空 IP，防止 ES 报错"""
         if "source" in payload and isinstance(payload["source"], dict):
             if payload["source"].get("ip") == "":
                 payload["source"]["ip"] = None
@@ -117,11 +120,11 @@ class WinAgent:
         return payload
 
     def send_alert(self, pid: int, anomalies: list):
-        """Constructs and sends an alert event for detected anomalies"""
+        """构建并发送内存异常告警"""
         utc_now = datetime.utcnow()
         timestamp_str = utc_now.isoformat() + "Z"
         
-        # Convert dict anomalies (from scanner) to Schema objects
+        # 将扫描器返回的异常字典转换为 Schema 对象
         schema_anomalies = []
         for a in anomalies:
             schema_anomalies.append(MemoryAnomaly(
@@ -142,7 +145,7 @@ class WinAgent:
                 category="host",
                 type="info",
                 action="memory_scan",
-                severity=8, # High severity for memory threats
+                severity=8, # 内存威胁通常为高危
                 dataset="win_memory_scanner"
             ),
             host=HostInfo(
@@ -153,7 +156,7 @@ class WinAgent:
             ),
             process=ProcessInfo(
                 pid=pid,
-                name="<unknown>", # Without OpenProcess query we might not know name here easily
+                name="<unknown>", # 暂未获取进程名
                 start_time=timestamp_str
             ),
             memory=MemoryInfo(anomalies=schema_anomalies),
@@ -165,7 +168,7 @@ class WinAgent:
             message=f"Detected {len(anomalies)} memory anomalies in PID {pid}"
         )
         
-        # Send
+        # 发送
         index_name = self.get_index_name()
         url = f"{ES_HOST}/{index_name}/_doc"
         payload = self._sanitize_payload(event.to_dict())
@@ -181,13 +184,13 @@ class WinAgent:
         
         while True:
             try:
-                # 1. Get PIDs
+                # 1. 获取 PID 列表
                 pids = enum_processes()
                 logger.info(f"Scanning {len(pids)} processes...")
                 
-                # 2. Scan each PID
+                # 2. 扫描每个 PID
                 for pid in pids:
-                    # Skip System/Idle processes usually 0 and 4
+                    # 跳过 System/Idle 进程
                     if pid <= 4: 
                         continue
                         

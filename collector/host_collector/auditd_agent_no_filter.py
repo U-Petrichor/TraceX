@@ -68,6 +68,13 @@ def get_current_index_name():
 
 # === Behavior Analysis & Memory Monitoring ===
 class BehaviorAnalyzer:
+    """
+    行为分析器：基于系统调用序列检测内存威胁 (无过滤版)
+    功能：
+    1. 实时分析系统调用序列 (Ptrace, Memfd, Mprotect)
+    2. 触发内存扫描 (调用 mem_scanner)
+    3. 异常结果入库 (Elasticsearch)
+    """
     def __init__(self, es_client, index_name_func):
         self.es = es_client
         self.get_index_name = index_name_func
@@ -77,20 +84,21 @@ class BehaviorAnalyzer:
         self.lock = threading.Lock()
         
         # High Risk Sequence Definitions
+        # 定义高危行为序列
         self.sequences = [
-            # Sequence 1: Ptrace Injection
+            # Sequence 1: Ptrace Injection (Ptrace 注入)
             {
                 "events": ["ptrace", "write"],
                 "window": 5.0,
                 "name": "Ptrace Injection"
             },
-            # Sequence 2: Fileless Execution
+            # Sequence 2: Fileless Execution (无文件执行)
             {
                 "events": ["memfd_create", "execve"], 
                 "window": 5.0,
                 "name": "Fileless Execution"
             },
-            # Sequence 3: Memory Tampering
+            # Sequence 3: Memory Tampering (内存篡改)
             {
                 "events": ["write", "mprotect"],
                 "window": 5.0,
@@ -99,6 +107,7 @@ class BehaviorAnalyzer:
         ]
 
     def record_event(self, pid, syscall):
+        """记录系统调用事件并检查序列"""
         if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
             return
 
@@ -114,6 +123,7 @@ class BehaviorAnalyzer:
             self._check_sequences(pid)
 
     def _check_sequences(self, pid):
+        """检查 PID 是否触发了高危行为序列"""
         events = [e[0] for e in self.pid_events[pid]]
         
         should_scan = False
@@ -151,6 +161,7 @@ class BehaviorAnalyzer:
             self._trigger_scan(pid, reason)
 
     def _trigger_scan(self, pid, reason):
+        """触发内存扫描 (防抖动: 5秒)"""
         now = time.time()
         last_scan = self.scan_history.get(pid, 0)
         
@@ -164,6 +175,7 @@ class BehaviorAnalyzer:
         threading.Thread(target=self._run_scan, args=(pid, reason), daemon=True).start()
 
     def _run_scan(self, pid, reason):
+        """执行外部扫描器二进制文件"""
         try:
             # Timeout is crucial to prevent zombie processes
             result = subprocess.run(
@@ -185,6 +197,7 @@ class BehaviorAnalyzer:
             print(f"[-] Scan error for PID {pid}: {e}")
 
     def _ingest_scan_result(self, data, reason):
+        """处理扫描结果并入库"""
         pid = data.get("pid")
         raw_anomalies = data.get("anomalies", [])
         
@@ -238,7 +251,7 @@ class BehaviorAnalyzer:
             print(f"[-] ES Index Error: {e}")
 
     def run_periodic_scan(self):
-        """Run full scan periodically if load is low"""
+        """定期全量扫描 (如果负载较低)"""
         time.sleep(2)
         
         while True:
@@ -253,7 +266,7 @@ class BehaviorAnalyzer:
                     continue
             except ImportError:
                 pass 
-                
+            
             try:
                 # Run full scan
                 result = subprocess.run(

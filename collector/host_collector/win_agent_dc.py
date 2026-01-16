@@ -80,14 +80,15 @@ class SystemInfoCollector:
         except Exception:
             return HostOS(family="windows", name="Unknown", version="0.0")
 
-# === WinAgentDC (Independent Implementation) ===
+# === WinAgentDC (独立实现) ===
 class WinAgentDC:
     """
-    TraceX Windows Agent for Domain Controllers (DC) - Standalone Version
-    Features:
-    1. Memory Scanning (from WinMemoryScanner)
-    2. Security Event Log Monitoring (PowerShell)
-    3. Independent Logic (No inheritance from win_agent.py to avoid conflicts)
+    TraceX Windows Agent for Domain Controllers (DC) - 独立版本
+    
+    功能特点:
+    1. 内存扫描 (Memory Scanning): 调用 WinMemoryScanner 检测异常
+    2. 安全日志监控 (Security Log Monitoring): 通过 PowerShell 实时抓取安全日志
+    3. 独立逻辑: 不继承自 win_agent.py，避免依赖冲突
     """
     def __init__(self):
         self.sys_info = SystemInfoCollector()
@@ -98,9 +99,11 @@ class WinAgentDC:
         logger.info(f"WinAgent DC (Standalone) initialized on {self.sys_info.hostname}")
 
     def get_index_name(self):
+        # 统一使用北京时间命名索引
         return f"unified-logs-{datetime.utcnow().strftime('%Y.%m.%d')}"
     
     def _sanitize_payload(self, payload: dict) -> dict:
+        """清理 Payload 中的空 IP 字段，避免 ES 报错"""
         if "source" in payload and isinstance(payload["source"], dict):
             if payload["source"].get("ip") == "":
                 payload["source"]["ip"] = None
@@ -109,8 +112,9 @@ class WinAgentDC:
                 payload["destination"]["ip"] = None
         return payload
 
-    # --- Memory Scanning Logic (Copied & Adapted) ---
+    # --- 内存扫描逻辑 (复制并适配) ---
     def enum_processes(self):
+        """枚举当前系统所有进程 PID"""
         psapi = ctypes.windll.psapi
         arr = (ctypes.c_ulong * 1024)()
         cb = ctypes.sizeof(arr)
@@ -121,6 +125,7 @@ class WinAgentDC:
         return []
 
     def send_memory_alert(self, pid: int, anomalies: list):
+        """构建并发送内存异常告警"""
         utc_now = datetime.utcnow()
         timestamp_str = utc_now.isoformat() + "Z"
         
@@ -176,6 +181,7 @@ class WinAgentDC:
             pass
 
     def run_memory_scanner(self):
+        """运行内存扫描循环 (主线程)"""
         if not self.mem_scanner:
             logger.warning("Memory Scanner not available. Skipping.")
             return
@@ -196,8 +202,12 @@ class WinAgentDC:
                 logger.error(f"Memory Scan Error: {e}")
                 time.sleep(SCAN_INTERVAL)
 
-    # --- Security Log Logic (Optimized) ---
+    # --- 安全日志逻辑 (优化版) ---
     def _get_powershell_events(self, start_time: datetime):
+        """
+        使用 PowerShell 获取 Windows 安全日志
+        关注事件 ID: 4624 (登录成功), 4625 (登录失败), 4768 (Kerberos TGT), 4776 (NTLM 验证) 等
+        """
         ps_script = f"""
         $ids = @(4624, 4625, 4768, 4776, 4720, 4726)
         $time = (Get-Date).AddSeconds(-15)
@@ -219,6 +229,7 @@ class WinAgentDC:
             }}
         }} | ConvertTo-Json -Compress -Depth 2
         """
+
         try:
             cmd = ["powershell", "-Command", ps_script]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

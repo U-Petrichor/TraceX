@@ -67,31 +67,38 @@ def get_current_index_name():
     beijing_time = datetime.utcnow() + timedelta(hours=8)
     return f"unified-logs-{beijing_time.strftime('%Y.%m.%d')}"
     
-# === Behavior Analysis & Memory Monitoring ===
+# === 行为分析与内存监控类 ===
 class BehaviorAnalyzer:
+    """
+    行为分析器：基于系统调用序列检测内存威胁
+    功能：
+    1. 实时分析系统调用序列 (Ptrace, Memfd, Mprotect)
+    2. 触发内存扫描 (调用 mem_scanner)
+    3. 异常结果入库 (Elasticsearch)
+    """
     def __init__(self, es_client, index_name_func):
         self.es = es_client
         self.get_index_name = index_name_func
-        self.pid_events = defaultdict(list)  # {pid: [(syscall, timestamp)]}
-        self.scan_history = {} # {pid: last_scan_timestamp}
-        self.alert_history = {} # {pid: last_alert_timestamp}
+        self.pid_events = defaultdict(list)  # 存储 PID 对应的事件列表 {pid: [(syscall, timestamp)]}
+        self.scan_history = {} # 记录扫描历史，防止重复扫描 {pid: last_scan_timestamp}
+        self.alert_history = {} # 记录报警历史，防止告警风暴 {pid: last_alert_timestamp}
         self.lock = threading.Lock()
         
-        # High Risk Sequence Definitions
+        # 定义高危行为序列
         self.sequences = [
-            # Sequence 1: Ptrace Injection
+            # 序列 1: Ptrace 注入 (常见于调试器攻击/进程注入)
             {
                 "events": ["ptrace", "write"],
                 "window": 5.0,
                 "name": "Ptrace Injection"
             },
-            # Sequence 2: Fileless Execution
+            # 序列 2: 无文件执行 (Memfd + Execve)
             {
                 "events": ["memfd_create", "execve"], 
                 "window": 5.0,
                 "name": "Fileless Execution"
             },
-            # Sequence 3: Memory Tampering
+            # 序列 3: 内存篡改 (写入 + 修改权限)
             {
                 "events": ["write", "mprotect"],
                 "window": 5.0,
@@ -100,30 +107,32 @@ class BehaviorAnalyzer:
         ]
 
     def record_event(self, pid, syscall):
+        """记录系统调用事件并检查威胁序列"""
         if not MEM_SCANNER_BIN or not os.path.exists(MEM_SCANNER_BIN):
             return
 
         now = time.time()
         with self.lock:
-            # Add event to history
+            # 添加事件到历史记录
             self.pid_events[pid].append((syscall, now))
             
-            # Prune old events (> 10s)
+            # 清理过期事件 (只保留最近 10 秒内的)
             self.pid_events[pid] = [e for e in self.pid_events[pid] if now - e[1] < 10.0]
             
-            # Check sequences
+            # 检查是否匹配高危序列
             self._check_sequences(pid)
 
     def _check_sequences(self, pid):
+        """核心逻辑：匹配系统调用序列"""
         events = [e[0] for e in self.pid_events[pid]]
         
         should_scan = False
         reason = ""
         
-        # Check explicit sequences
+        # 1. 检查定义的有序序列
         for seq in self.sequences:
             required = seq["events"]
-            # Simple check: do all required events exist in recent history in order?
+            # 简单检查：所需事件是否按顺序出现在近期历史中
             last_idx = -1
             found_count = 0
             for req_evt in required:
@@ -139,7 +148,7 @@ class BehaviorAnalyzer:
                 reason = seq["name"]
                 break
         
-        # Check single high-risk syscalls
+        # 2. 检查单次高危调用
         if not should_scan:
             if "ptrace" in events:
                 should_scan = True
@@ -152,21 +161,23 @@ class BehaviorAnalyzer:
             self._trigger_scan(pid, reason)
 
     def _trigger_scan(self, pid, reason):
+        """触发内存扫描器 (mem_scanner)"""
         now = time.time()
         last_scan = self.scan_history.get(pid, 0)
         
-        # Debounce: 5 seconds
+        # 防抖动：5秒内不重复扫描同一进程
         if now - last_scan < 5.0:
             return
             
         self.scan_history[pid] = now
         
-        # Run scan in background thread to avoid blocking main loop
+        # 在后台线程运行扫描，避免阻塞主日志处理循环
         threading.Thread(target=self._run_scan, args=(pid, reason), daemon=True).start()
 
     def _run_scan(self, pid, reason):
+        """执行外部扫描二进制文件"""
         try:
-            # Timeout is crucial to prevent zombie processes
+            # 设置超时非常重要，防止产生僵尸进程
             result = subprocess.run(
                 [MEM_SCANNER_BIN, "--pid", str(pid)],
                 capture_output=True,
@@ -181,15 +192,16 @@ class BehaviorAnalyzer:
                 except json.JSONDecodeError:
                     pass
         except subprocess.TimeoutExpired:
-            pass # Scan took too long, ignore
+            pass # 扫描超时，忽略
         except Exception as e:
             print(f"[-] Scan error for PID {pid}: {e}")
 
     def _ingest_scan_result(self, data, reason):
+        """处理扫描结果并上报到 ES"""
         pid = data.get("pid")
         raw_anomalies = data.get("anomalies", [])
         
-        # Filter anomalies: Only keep HIGH or CRITICAL
+        # 过滤异常：只保留 HIGH 或 CRITICAL 级别的风险
         anomalies = [
             a for a in raw_anomalies 
             if a.get("risk_level") in ["HIGH", "CRITICAL"]
@@ -207,19 +219,20 @@ class BehaviorAnalyzer:
         now = time.time()
         last_alert_time, last_signature = self.alert_history.get(pid, (0, ""))
         
+        # 5分钟内相同的告警去重
         if signature == last_signature and (now - last_alert_time < 300):
             return
 
         self.alert_history[pid] = (now, signature)
 
-        # Convert to UnifiedEvent format
+        # 转换为 UnifiedEvent 格式
         doc = {
             "@timestamp": datetime.utcnow().isoformat() + "Z",
             "host": {"name": socket.gethostname()},
             "event": {
                 "category": "memory",
                 "action": "anomaly_detected",
-                "severity": 10, # Memory anomalies are always critical
+                "severity": 10, # 内存异常默认为最高危
                 "reason": reason
             },
             "process": {
@@ -239,7 +252,7 @@ class BehaviorAnalyzer:
             print(f"[-] ES Index Error: {e}")
 
     def run_periodic_scan(self):
-        """Run full scan periodically if load is low"""
+        """周期性全盘扫描 (当系统负载较低时)"""
         time.sleep(2)
         
         while True:
@@ -247,7 +260,7 @@ class BehaviorAnalyzer:
                 time.sleep(300)
                 continue
                 
-            # Smart Load Check
+            # 智能负载检查：如果 CPU > 80% 则暂停扫描
             try:
                 if psutil.cpu_percent() > 80.0:
                     time.sleep(300) 
@@ -256,7 +269,7 @@ class BehaviorAnalyzer:
                 pass 
                 
             try:
-                # Run full scan
+                # 运行全盘扫描模式
                 result = subprocess.run(
                     [MEM_SCANNER_BIN, "--scan-all"],
                     capture_output=True,
@@ -277,8 +290,9 @@ class BehaviorAnalyzer:
             
             time.sleep(300)
 
-# === State & Lock Management ===
+# === 状态与文件锁管理 ===
 def load_state():
+    """加载断点续传状态"""
     if not os.path.exists(STATE_FILE):
         return {}
     try:
