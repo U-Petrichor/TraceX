@@ -90,7 +90,9 @@ class GraphBuilder:
             if not parent_node_id:
                 parent_node_id = self._md5(f"{host}|{ppid}|{pexe}|{pst}")
                 if parent_node_id not in self._nodes:
-                    self._nodes[parent_node_id] = GraphNode(id=parent_node_id, type='process', label=f"Parent:{ppid}", properties={"pid": ppid, "host": host})
+                    # [FIX] 父进程 label 也包含 PID
+                    parent_label = f"parent (PID:{ppid})"
+                    self._nodes[parent_node_id] = GraphNode(id=parent_node_id, type='process', label=parent_label, properties={"pid": ppid, "host": host})
 
             # 添加 spawned 边（避免重复边）
             if not any(e.source == parent_node_id and e.target == node_id and e.relation == 'spawned' for e in self._edges):
@@ -150,8 +152,9 @@ class GraphBuilder:
             # 延迟处理：收集必要信息，稍后在 build_from_events 统一解析
             self._deferred_parent_links.append((host, ppid, pexe, pst, process_node_id, ts))
 
-        # 6. 文件节点与关系（允许基于字段存在性构造）
-        if category == "file" or self._has_file_data(e):
+        # 6. 文件节点与关系
+        # [FIX] 只有 file 类别或非 authentication/network 类别且有文件数据时才创建
+        if category == "file" or (category not in ("authentication", "network") and self._has_file_data(e)):
             file_node_id = self._ensure_file_node(e, host, ts, atlas_label, severity, ttp)
             if process_node_id and file_node_id:
                 relation = self._map_file_relation(self._get_val(e, 'event.action', ''))
@@ -159,8 +162,10 @@ class GraphBuilder:
             elif host_node_id and file_node_id:
                 self._add_edge(host_node_id, file_node_id, 'host_file', ts)
 
-        # 7. 网络节点与关系（允许基于字段存在性构造）
-        if category == "network" or self._has_network_data(e):
+        # 7. 网络节点与关系
+        # [FIX] 只有 network 类别或非 authentication/file 类别且有网络数据时才创建
+        # authentication 事件的 destination.ip 是认证目标，不应创建 network 节点
+        if category == "network" or (category not in ("authentication", "file") and self._has_network_data(e)):
             network_node_id = self._ensure_network_node(e, host, ts, atlas_label, severity, ttp)
             if process_node_id and network_node_id:
                 relation = self._map_network_relation(self._get_val(e, 'network.direction', ''))
@@ -168,8 +173,9 @@ class GraphBuilder:
             elif host_node_id and network_node_id:
                 self._add_edge(host_node_id, network_node_id, 'host_network', ts)
 
-        # 8. 认证节点与关系（允许基于字段存在性构造）
-        if category == "authentication" or self._has_auth_data(e):
+        # 8. 认证节点与关系
+        # [FIX] 只有 authentication 类别或非 network/file 类别且有认证数据时才创建
+        if category == "authentication" or (category not in ("network", "file") and self._has_auth_data(e)):
             auth_node_id = self._ensure_auth_node(e, host, ts, atlas_label, severity, ttp)
             if process_node_id and auth_node_id:
                 self._add_edge(process_node_id, auth_node_id, 'auth', ts)
@@ -183,10 +189,13 @@ class GraphBuilder:
         st = self.pid_cache.get_start_time(host, pid) or self._get_val(e, 'process.start_time') or ts
         node_id = self._md5(f"{host}|{pid}|{exe}|{st}")
         if node_id not in self._nodes:
+            # [FIX] 进程 label 包含 PID，便于区分不同进程实例
+            base_name = os.path.basename(exe) if exe else "process"
+            label = f"{base_name} (PID:{pid})" if pid else base_name
             self._nodes[node_id] = GraphNode(
                 id=node_id,
                 type='process',
-                label=os.path.basename(exe) if exe else f"PID:{pid}",
+                label=label,
                 atlas_label=atlas_label,
                 severity=severity,
                 ttp=ttp,
@@ -221,7 +230,8 @@ class GraphBuilder:
         path = self._get_val(e, 'file.path', '')
         if not path:
             return None
-        node_id = self.generate_node_id(e)
+        # [FIX] 使用文件特定的 ID 生成逻辑，避免与其他节点类型 ID 冲突
+        node_id = self._md5(f"file|{host}|{path}")
         if node_id not in self._nodes:
             self._nodes[node_id] = GraphNode(
                 id=node_id,
@@ -244,10 +254,12 @@ class GraphBuilder:
                              atlas_label: str, severity: int, ttp: str) -> Optional[str]:
         src_ip = self._get_val(e, 'source.ip', '')
         dst_ip = self._get_val(e, 'destination.ip', '')
+        dst_port = self._get_val(e, 'destination.port', '')
         proto = self._get_val(e, 'network.protocol', '')
         if not (src_ip or dst_ip or proto):
             return None
-        node_id = self.generate_node_id(e)
+        # [FIX] 使用网络特定的 ID 生成逻辑，避免与其他节点类型 ID 冲突
+        node_id = self._md5(f"network|{host}|{dst_ip}|{dst_port}|{proto}")
         label = self._build_network_label(e)
         if node_id not in self._nodes:
             self._nodes[node_id] = GraphNode(
@@ -261,7 +273,7 @@ class GraphBuilder:
                     "source_ip": src_ip,
                     "source_port": self._get_val(e, 'source.port'),
                     "destination_ip": dst_ip,
-                    "destination_port": self._get_val(e, 'destination.port'),
+                    "destination_port": dst_port,
                     "protocol": proto,
                     "direction": self._get_val(e, 'network.direction'),
                     "host": host
@@ -273,9 +285,11 @@ class GraphBuilder:
                           atlas_label: str, severity: int, ttp: str) -> Optional[str]:
         user = self._get_val(e, 'user.name', '')
         src_ip = self._get_val(e, 'source.ip', '')
+        outcome = self._get_val(e, 'event.outcome', '')
         if not (user or src_ip):
             return None
-        node_id = self.generate_node_id(e)
+        # [FIX] 使用认证特定的 ID 生成逻辑，避免与其他节点类型 ID 冲突
+        node_id = self._md5(f"auth|{host}|{user}|{src_ip}|{outcome}")
         label = f"{user}@{src_ip}" if user and src_ip else (user or src_ip)
         if node_id not in self._nodes:
             self._nodes[node_id] = GraphNode(
@@ -288,7 +302,7 @@ class GraphBuilder:
                 properties={
                     "user": user,
                     "source_ip": src_ip,
-                    "outcome": self._get_val(e, 'event.outcome', ''),
+                    "outcome": outcome,
                     "host": host
                 }
             )

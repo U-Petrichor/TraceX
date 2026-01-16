@@ -144,16 +144,9 @@
 
   const normalizeChain = (rawChain) => {
     const list = Array.isArray(rawChain) ? rawChain : [];
-    const parsed = list.map((item) => parseChainItem(item)).filter(Boolean);
-    const seen = new Set();
-    return parsed.filter((edge) => {
-      const key = `${edge.sourceType}:${edge.sourceLabel}|${edge.relation}|${edge.targetType}:${edge.targetLabel}`;
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
+    // [FIX] 移除了基于 label 的去重逻辑，保留所有边（按时间顺序）
+    // 不同进程实例现在通过 PID 在 label 中区分
+    return list.map((item) => parseChainItem(item)).filter(Boolean);
   };
 
   const buildGraph = (chain) => {
