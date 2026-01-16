@@ -124,6 +124,16 @@ class WinAgentDC(WinAgent):
                 
                 if not unified_event:
                     continue
+                
+                # Print detection to terminal (User Request)
+                user_name = unified_event.user.name or "N/A"
+                src_ip = unified_event.source.ip or "Local/N/A"
+                action = unified_event.event.action
+                print(f"\n[!] 捕获安全事件: {action}")
+                print(f"    - 用户: {user_name}")
+                print(f"    - 来源: {src_ip}")
+                print(f"    - 时间: {unified_event.timestamp}")
+                print("-" * 40)
                     
                 # Supplement HostInfo (since parser might not know local host details if raw log doesn't have them)
                 unified_event.host.name = self.sys_info.hostname
