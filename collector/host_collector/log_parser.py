@@ -118,6 +118,16 @@ class HostLogParser:
             event.file.path = data.get("ObjectName", "")
             if event.file.path:
                 event.file.name = event.file.path.split("\\")[-1]
+        # 统一处理 process.start_time
+        # Elasticsearch 可能会因为 process.start_time 为空字符串 "" 而报错 mapper_parsing_exception
+        # UnifiedEvent 默认可能初始化为 ""，这里要强制修正
+        if hasattr(event, "process") and event.process:
+             # 如果没有 process 相关的事件（比如纯登录事件），确保这些字段为 None 而不是空字符串
+             if not event.process.pid and not event.process.executable:
+                 event.process.start_time = None
+             elif event.process.start_time == "":
+                 event.process.start_time = None
+
         return event
 
     def parse_auditd_line(self, line: str) -> dict:
