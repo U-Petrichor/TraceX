@@ -854,6 +854,24 @@ def _convert_graph_to_report(graph_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@app.get("/api/active-simulations")
+def get_active_simulations():
+    active_dir = PROJECT_ROOT / "web" / "backend" / "active_simulations"
+    active_dir.mkdir(parents=True, exist_ok=True)
+    
+    simulations = []
+    # Always include TheLastTest for verification if it exists or as a default
+    # But user wants "only after run", so maybe we keep TheLastTest as a permanent option?
+    # The user said "switches for APT28, APT29...", implying the dynamic ones.
+    # I will keep TheLastTest hardcoded in frontend or add it here if needed. 
+    # Let's return what's in the folder.
+    
+    for file in active_dir.glob("*"):
+        if file.is_file():
+            simulations.append(file.name)
+            
+    return {"active": simulations}
+
 @app.get("/api/apt-report")
 def get_apt_report(mode: str = "direct", data: str = "APT28.jsonl", refresh: bool = False):
     # Special handling for TheLastTest
