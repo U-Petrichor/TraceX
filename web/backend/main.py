@@ -811,8 +811,64 @@ def get_attacks(hours: int = 24, limit: int = 50):
         return {"attacks": results}
 
 
+def _convert_graph_to_report(graph_data: Dict[str, Any]) -> Dict[str, Any]:
+    nodes = {n['id']: n for n in graph_data.get('nodes', [])}
+    edges = graph_data.get('edges', [])
+    structure = []
+    
+    for e in edges:
+        src = nodes.get(e['source'])
+        dst = nodes.get(e['target'])
+        if src and dst:
+            structure.append({
+                "source_type": src.get('type', 'unknown'),
+                "source": src.get('label', src['id']),
+                "relation": e.get('relation', 'related'),
+                "target_type": dst.get('type', 'unknown'),
+                "target": dst.get('label', dst['id'])
+            })
+            
+    return {
+        "simulation": {
+            "name": "TheLastTest",
+            "mode": "Realtime Verification",
+            "event_count": len(edges),
+            "node_count": len(nodes),
+            "edge_count": len(edges)
+        },
+        "attack_chain_signature": ["User Simulation", "Realtime Graph"],
+        "attack_chain_structure": structure,
+        "ttp_attribution": {
+            "suspected_group": "TheLastTest",
+            "confidence": 1.0,
+            "matched_ttps": ["T1055", "T1078"], 
+            "top_matches": []
+        },
+        "apt_profile": {
+            "name": "TheLastTest",
+            "aliases": ["Manual Verification"],
+            "ttps": ["T1055", "T1078"],
+            "target_industries": ["Internal Test"]
+        },
+        "ioc_enrichment": {}
+    }
+
+
 @app.get("/api/apt-report")
 def get_apt_report(mode: str = "direct", data: str = "APT28.jsonl", refresh: bool = False):
+    # Special handling for TheLastTest
+    if data == "TheLastTest":
+        graph_path = PROJECT_ROOT / "TheLastTest" / "attack_graph.json"
+        if graph_path.exists():
+            try:
+                graph_data = json.loads(graph_path.read_text(encoding="utf-8"))
+                return _convert_graph_to_report(graph_data)
+            except Exception as e:
+                logger.error(f"Failed to load TheLastTest graph: {e}")
+                return {"error": f"Failed to load graph: {str(e)}"}
+        else:
+            return {"error": "Graph file not found. Please run 2_verify_provenance.py first."}
+
     safe_mode = "sigma" if mode == "sigma" else "direct"
     safe_data = Path(data).name
     if not safe_data.endswith(".jsonl"):
