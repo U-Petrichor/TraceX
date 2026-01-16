@@ -392,18 +392,11 @@
   const populateSimulations = async () => {
     if (!els.dataSelect || !fetchJson) return;
     try {
+      console.log("Fetching active simulations...");
       const res = await fetchJson("/api/active-simulations");
+      console.log("Active simulations response:", res);
       const active = res?.active || [];
       
-      // Keep existing options (TheLastTest) and append new ones
-      // OR clear and rebuild. Let's keep TheLastTest as it's hardcoded in HTML now.
-      // But we need to avoid duplicates if called multiple times? 
-      // Current logic: just append.
-      
-      // Clear existing dynamic options (if any) to be safe?
-      // For now, let's just append. The user expects them to appear.
-      
-      // Filter out what's already there?
       const existing = new Set(Array.from(els.dataSelect.options).map(o => o.value));
       
       active.forEach(filename => {
