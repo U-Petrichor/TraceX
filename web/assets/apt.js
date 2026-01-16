@@ -349,6 +349,21 @@
     renderMatches(data.top_matches);
   };
 
+  const parseDescription = (text) => {
+    if (!text) return "暂无描述";
+    
+    // 1. Remove citations like (Citation: ...)
+    let cleanText = text.replace(/\(Citation:.*?\)/g, "");
+    
+    // 2. Parse Markdown links [text](url) -> <a href="url"...>text</a>
+    cleanText = cleanText.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g, 
+      '<a href="$2" target="_blank" class="apt-link">$1</a>'
+    );
+    
+    return cleanText;
+  };
+
   const renderProfile = (profile) => {
     if (!profile) {
       return;
@@ -362,7 +377,8 @@
     }
     
     if (els.profileDescription) {
-      els.profileDescription.textContent = profile.description || "暂无描述";
+      // Use innerHTML to support parsed links
+      els.profileDescription.innerHTML = parseDescription(profile.description);
     }
     if (els.profileMitreId) {
       els.profileMitreId.textContent = profile.mitre_id || "--";
@@ -372,6 +388,8 @@
         els.profileUrl.href = profile.url;
         els.profileUrl.style.display = "inline-flex";
         els.profileUrl.classList.remove("disabled");
+        // Update text to be more descriptive
+        els.profileUrl.textContent = "MITRE 知识库";
       } else {
         els.profileUrl.removeAttribute("href");
         els.profileUrl.classList.add("disabled");
