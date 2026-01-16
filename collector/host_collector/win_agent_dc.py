@@ -70,7 +70,7 @@ class WinAgentDC(WinAgent):
             }}
             
             @{{
-                TimeCreated = $evt.TimeCreated
+                TimeCreated = $evt.TimeCreated.ToString('yyyy-MM-ddTHH:mm:ss.ffffffZ')
                 Id = $evt.Id
                 Message = $evt.Message
                 EventData = $data
@@ -146,9 +146,14 @@ class WinAgentDC(WinAgent):
                 payload = self._sanitize_payload(unified_event.to_dict())
                 
                 try:
-                    self.session.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=2)
-                    processed_count += 1
+                    resp = self.session.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=2)
+                    if resp.status_code in [200, 201]:
+                        print(f"[+] 数据已发送至服务器: {url} (Status: {resp.status_code})")
+                        processed_count += 1
+                    else:
+                        print(f"[-] 发送失败: {resp.status_code} - {resp.text}")
                 except Exception as e:
+                    print(f"[-] 发送异常: {e}")
                     # logger.error(f"Failed to send event: {e}")
                     pass
             
