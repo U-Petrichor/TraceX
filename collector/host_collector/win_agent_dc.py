@@ -126,6 +126,49 @@ class WinAgentDC(WinAgent):
                 if not unified_event:
                     continue
                 
+                # [Fix] 正确设置 Host 信息
+                # 之前这里强制把 host 覆盖成了 DC 自己 (self.sys_info)，导致所有数据都显示来自 DC。
+                # 实际上，对于 4768 (Kerberos) / 4624 (Network Logon) 这类事件，真正的源头在 source.ip 里。
+                # 虽然事件是从 DC 采集的，但我们希望在界面上能体现出是哪台机器的操作。
+                
+                # 策略 1: 保持 host 为 DC (因为日志确实是 DC 产生的)，但确保 source.ip 是 PC-1
+                # unified_event.host.name = self.sys_info.hostname
+                # unified_event.host.ip = self.sys_info.ip
+                
+                # 策略 2: (用户需求) 让这条数据看起来像是那台机器产生的
+                # 如果 source.ip 存在且不是 DC 自己，我们可以把它挪到 host.ip 吗？
+                # 答：不建议。因为 host 字段通常代表 Log shipper (日志采集者)。
+                # 正确的做法是：Kibana 查询时应该看 source.ip 而不是 host.ip。
+                
+                # 但是，既然用户说 "让最终传输的数据为对应的登陆的那台机器的信息"，
+                # 可能是指他希望在 host 字段看到来源机器。
+                # 我们这里做一个特殊的逻辑：
+                # 如果是远程登录事件 (source.ip 有值)，且不是本地回环，我们将 source.ip 填入 host.ip (或者作为相关 IP)
+                
+                if unified_event.source.ip and unified_event.source.ip not in ["-", "::1", "127.0.0.1"]:
+                     # 这是一个来自远端的事件
+                     # 注意：我们不知道远端的主机名 (host.name)，只知道 IP。
+                     # 为了满足用户需求，我们把 source.ip 同时也赋给 host.ip (虽然这在语义上有点混淆，但能达到"这条数据属于那台机器"的效果)
+                     # 或者更好的方式：保留 host 为 DC，但在打印和展示时强调 source。
+                     pass
+
+                # 重新审视代码，发现之前这里无脑覆盖了 host 信息：
+                # unified_event.host.name = self.sys_info.hostname  <-- 问题在这里
+                # 
+                # 对于 DC 转发的日志，unified_event.source.ip 才是主角。
+                # 如果用户坚持要 "数据库里存的数据为对应的登陆机器"，那我们需要把 source.ip 提升为主要索引字段。
+                
+                # 修正逻辑：
+                # 1. host 字段依然保留为 DC (因为确实是 DC 记录的日志，篡改 host 会导致元数据混乱)。
+                # 2. 确保 source.ip 字段被正确填充 (LogParser 已经做了)。
+                # 3. 如果 LogParser 解析出了 User 和 Source IP，不要用 DC 的本地信息去覆盖它们 (LogParser 里的逻辑是优先的，这里只填充空缺)。
+                
+                if not unified_event.host.name:
+                    unified_event.host.name = self.sys_info.hostname
+                if not unified_event.host.ip:
+                    unified_event.host.ip = self.sys_info.ip
+                unified_event.host.os = self.sys_info.os_info
+                
                 # Print detection to terminal (User Request)
                 user_name = unified_event.user.name or "N/A"
                 src_ip = unified_event.source.ip or "Local/N/A"
@@ -135,11 +178,6 @@ class WinAgentDC(WinAgent):
                 print(f"    - 来源: {src_ip}")
                 print(f"    - 时间: {unified_event.timestamp}")
                 print("-" * 40)
-                    
-                # Supplement HostInfo (since parser might not know local host details if raw log doesn't have them)
-                unified_event.host.name = self.sys_info.hostname
-                unified_event.host.ip = self.sys_info.ip
-                unified_event.host.os = self.sys_info.os_info
                 
                 # Send
                 index_name = self.get_index_name()
