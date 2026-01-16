@@ -1,11 +1,4 @@
 # collector/common/schema.py
-"""
-统一数据格式定义 v4.0 (Final)
-变更记录:
-- 新增 MetaData 用于 ATLAS 图抽象
-- 新增 DetectionInfo 用于 Sigma 规则名存储
-- 增加 get_start_time_ms 辅助方法
-"""
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -67,7 +60,6 @@ class ProcessInfo:
     command_line: str = ""
     parent: ProcessParent = field(default_factory=ProcessParent)
     user: ProcessUser = field(default_factory=ProcessUser)
-    # 原始启动时间字符串，用于生成唯一 ID
     start_time: str = "" 
 
 @dataclass
@@ -97,7 +89,6 @@ class UserInfo:
     name: str = ""
     id: str = ""
     domain: str = ""
-    # UPDATE-01-14-0619.md
     session_id: str = "" 
 
 @dataclass
@@ -116,22 +107,19 @@ class ThreatInfo:
     tactic: TacticInfo = field(default_factory=TacticInfo)
     technique: TechniqueInfo = field(default_factory=TechniqueInfo)
 
-# --- v4.0 新增类 Start ---
-
 @dataclass
 class MetaData:
-    """v4.0 新增: 用于图计算和溯源分析的元数据"""
+    """用于图计算和溯源分析的元数据"""
     atlas_label: str = ""     # ATLAS 抽象标签 (如 TEMP_FILE, WEBSHELL)
     path_signature: str = ""  # 路径签名，用于 NODOZE 频率分析
 
 @dataclass
 class DetectionInfo:
-    """v4.0 新增: 存储 Sigma/IDS 具体检测结果"""
-    rules: List[str] = field(default_factory=list) # 命中的具体规则名称 (如 "Suspicious Curl")
+    """存储 Sigma/IDS 具体检测结果"""
+    rules: List[str] = field(default_factory=list)
     confidence: float = 0.0                        # 置信度 0.0 - 1.0
     severity: str = ""                             # low, medium, high, critical
 
-# --- v4.1 新增类 (内存检测) ---
 
 @dataclass
 class MemoryAnomaly:
@@ -150,8 +138,6 @@ class MemoryAnomaly:
 class MemoryInfo:
     """v4.1 新增: 内存监控信息"""
     anomalies: List[MemoryAnomaly] = field(default_factory=list)
-
-# --- v4.0 新增类 End ---
 
 @dataclass
 class EventInfo:
@@ -181,11 +167,9 @@ class UnifiedEvent:
     message: str = ""
     raw: Dict = field(default_factory=dict)
     
-    # v4.0 新增字段
     metadata: MetaData = field(default_factory=MetaData)
     detection: DetectionInfo = field(default_factory=DetectionInfo)
     
-    # v4.1 新增字段
     memory: MemoryInfo = field(default_factory=MemoryInfo)
     
     def to_dict(self) -> dict:
@@ -196,7 +180,7 @@ class UnifiedEvent:
     
     def get_start_time_ms(self) -> str:
         """
-        v4.0 辅助方法: 获取用于生成唯一 ID 的时间基准
+        辅助方法: 获取用于生成唯一 ID 的时间基准
         优先使用 process.start_time，否则降级使用 @timestamp
         """
         if self.process.start_time:
@@ -205,7 +189,7 @@ class UnifiedEvent:
 
     @classmethod
     def from_dict(cls, data: dict) -> "UnifiedEvent":
-        """从字典递归创建对象 (v4.0 增强版)"""
+        """从字典递归创建对象"""
         if not data:
             return cls()
             
@@ -218,9 +202,6 @@ class UnifiedEvent:
         # Helper function for safe conversion
         def safe_convert(field_name, target_cls, parent_data):
             if isinstance(parent_data.get(field_name), dict):
-                # 递归处理 deeper nested dicts specifically for known structures
-                # (这里简化处理，依赖 target_cls 的 __init__ 能接收 dict)
-                # 针对特定嵌套较深的类进行特殊处理:
                 sub_data = parent_data[field_name]
                 
                 if field_name == "source":
@@ -256,7 +237,6 @@ class UnifiedEvent:
                         converted_anomalies = []
                         for item in anomalies_list:
                             if isinstance(item, dict):
-                                # 过滤掉不在 dataclass 定义中的多余字段
                                 valid_item_keys = {k: v for k, v in item.items() if k in MemoryAnomaly.__dataclass_fields__}
                                 converted_anomalies.append(MemoryAnomaly(**valid_item_keys))
                             else:
@@ -265,11 +245,9 @@ class UnifiedEvent:
                 
                 # 直接转换
                 try:
-                    # 过滤掉不在 dataclass 定义中的多余字段
                     valid_sub_keys = {k: v for k, v in sub_data.items() if k in target_cls.__dataclass_fields__}
                     parent_data[field_name] = target_cls(**valid_sub_keys)
                 except Exception:
-                    # 如果转换失败（例如字段不匹配），保留空对象或默认值
                     parent_data[field_name] = target_cls()
 
         # 执行转换
@@ -282,8 +260,6 @@ class UnifiedEvent:
         safe_convert("network", NetworkInfo, data)
         safe_convert("user", UserInfo, data)
         safe_convert("threat", ThreatInfo, data)
-        
-        # --- v4.0 新增字段转换 ---
         safe_convert("metadata", MetaData, data)
         safe_convert("detection", DetectionInfo, data)
         safe_convert("memory", MemoryInfo, data)

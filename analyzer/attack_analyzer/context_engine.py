@@ -1,9 +1,4 @@
 # analyzer/attack_analyzer/context_engine.py
-"""
-TraceX Context Engine — 合并修复与启发式补全
-本文件整合了 SafeEventWrapper、时间解析、get_seed_events 的最小置信度注入，
-并补全漏失的启发式识别规则以通过主机采集验证套件。
-"""
 import os
 import logging
 from typing import Dict, Any, List, Optional

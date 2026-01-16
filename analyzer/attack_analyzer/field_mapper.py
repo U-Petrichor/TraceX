@@ -1,10 +1,4 @@
 # analyzer/attack_analyzer/field_mapper.py
-"""
-ECS 到 Sigma 字段映射器 (v5.2 Update - Fixed)
-修复记录:
-- 补全 EventNormalizer 类
-- 增强 Auditd 字段映射兜底逻辑
-"""
 import re
 from typing import Dict, Any, Optional
 

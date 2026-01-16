@@ -44,11 +44,6 @@ class HostLogParser:
         3. 处理特殊的 XML 嵌套结构
         """
         event = UnifiedEvent()
-        # event.raw = win_log # 移除 Raw Log，防止字段爆炸
-        # 如果需要 raw 数据，应该存成字符串，而不是嵌套字典
-        # 但 ES 如果已经建立了 object 映射，这里改字符串会报错。
-        # 临时方案：改个名字叫 raw_text，或者不存 raw，只存 message
-        # event.raw = json.dumps(win_log, ensure_ascii=False) 
         
         event.event.dataset = "windows"
         
