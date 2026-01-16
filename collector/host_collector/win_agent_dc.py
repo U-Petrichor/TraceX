@@ -70,7 +70,8 @@ class WinAgentDC(WinAgent):
             }}
             
             @{{
-                TimeCreated = $evt.TimeCreated.ToString('yyyy-MM-ddTHH:mm:ss.ffffffZ')
+                # 转换为 UTC 时间格式 (ToUniversalTime)，确保与 ES/Kibana 标准一致
+                TimeCreated = $evt.TimeCreated.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.ffffffZ')
                 Id = $evt.Id
                 Message = $evt.Message
                 EventData = $data
