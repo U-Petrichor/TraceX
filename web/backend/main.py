@@ -861,8 +861,9 @@ def get_apt_report(mode: str = "direct", data: str = "APT28.jsonl", refresh: boo
         graph_path = PROJECT_ROOT / "TheLastTest" / "attack_graph.json"
         if graph_path.exists():
             try:
+                # 直接加载生成的报告，因为它已经是完整的格式
                 graph_data = json.loads(graph_path.read_text(encoding="utf-8"))
-                return _convert_graph_to_report(graph_data)
+                return graph_data
             except Exception as e:
                 logger.error(f"Failed to load TheLastTest graph: {e}")
                 return {"error": f"Failed to load graph: {str(e)}"}

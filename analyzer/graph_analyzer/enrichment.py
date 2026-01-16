@@ -448,9 +448,17 @@ class IntelEnricher:
         
         # IP 地址
         for key in ["ip", "src_ip", "dst_ip", "source_ip", "dest_ip", "destination_ip"]:
-            ip = props.get(key)
-            if ip and ip not in ["", "127.0.0.1", "0.0.0.0"]:
-                iocs.append(ip)
+            val = props.get(key)
+            if not val:
+                continue
+            
+            if isinstance(val, list):
+                for v in val:
+                    if isinstance(v, str) and v not in ["", "127.0.0.1", "0.0.0.0"]:
+                        iocs.append(v)
+            elif isinstance(val, str):
+                if val not in ["", "127.0.0.1", "0.0.0.0"]:
+                    iocs.append(val)
         
         # 直接从 label 提取（IP 节点）
         if node.get("type") == "ip":
